@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{REPORT_TITLE}}</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background-color: #fff;
+            padding: 30px;
+            color: #4F4C4C;
+            font-size: 0.9em;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1;
+            padding-top: 100px;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.4);
+        }
+
+        .modal-content {
+            position: relative;
+            background-color: #fff;
+            margin: auto;
+            padding: 0;
+            border: 1px solid #aaa;
+            width: 50%;
+            box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2),0 6px 20px 0 rgba(0,0,0,0.19);
+            -webkit-animation-name: animatetop;
+            -webkit-animation-duration: 0.4s;
+            animation-name: animatetop;
+            animation-duration: 0.4s;
+        }
+
+        @-webkit-keyframes animatetop {
+            from {top:-300px; opacity:0} 
+            to {top:0; opacity:1}
+        }
+
+        @keyframes animatetop {
+            from {top:-300px; opacity:0}
+            to {top:0; opacity:1}
+        }
+
+        .modal-close {
+            color: #aaa;
+            float: right;
+            padding-top: 4px;
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .modal-close:hover,
+        .modal-close:focus {
+            color: #aaa;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        .modal-header {
+            padding: 2px 16px;
+            background-color: #ededed;
+            border-bottom: 1px solid #aaa;
+            background-image: linear-gradient(to bottom,#fff 0%,#e0e0e0 100%);
+            text-shadow: 0 1px 0 #fff;
+        }
+
+        .modal-body {
+            padding: 2px 16px;
+        }
+
+        .modal-footer {
+            padding: 2px 16px;
+            background-color: #ededed;
+            border-top: 1px solid #aaa;
+            font-size: 12px;
+            font-weight: normal;
+            text-align: right;
+        }
+
+        #company-logo {
+            position: absolute;
+            background-repeat: no-repeat;
+            width: 127px;
+            height: 50px;
+            top: 28px;
+            right: 37px;
+            border: none;
+            background-image: url('data:image/png;base64,$CompanyLogoBase64String');
+        }
+
+        .button-clicked {
+            background-image: linear-gradient(to bottom,#e0e0e0 0%,#f7f7f7 100%);
+        }
+
+        button {
+            background-color: #4CAF50;
+            background-image: linear-gradient(to bottom,#fff 0%,#e0e0e0 100%);
+            border: 1px solid #aaa;
+            border-radius: 4px;
+            padding: 5px 10px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            margin-right: 5px;
+            cursor: pointer;
+            box-shadow: 0px 0px 2px 1px rgba(221,221,221,0.79);
+            text-shadow: 0 1px 0 #fff;
+        }
+
+        button:focus {
+            outline: #aaa;
+        }
+
+        button:hover {                /* added new */
+            background: #3498db;
+            color: white;
+            
+        }
+
+        details {
+            margin-top: 5px;
+            margin-bottom: 5px;
+            border: 1px solid #aaa;
+            border-radius: 4px;
+            padding: .5em .5em 0;
+            box-shadow: 0px 0px 6px 1px rgba(221,221,221,0.79);
+        }
+
+        details:hover {
+            cursor: pointer;
+            box-shadow: 0px 0px 6px 1px rgba(163, 204, 240.79);
+        }
+
+        details:focus {
+            outline: #aaa;
+        }
+
+        details[open] {
+             padding: .5em;
+        }
+
+        details[open] summary {
+            border-bottom: 1px solid #aaa;
+            margin-bottom: .5em;
+         }
+
+        summary {
+            margin: -.5em -.5em 0;
+            padding: .5em;
+        }
+
+        summary:focus {
+            outline: #aaa;
+        }
+     
+        .pre-content-alert-information { /* Blue */
+            padding-top: 3px;
+            padding-bottom: 5px;
+            padding-left: 5px;
+            padding-right: 5px;
+            margin-bottom: 10px;
+            border: 1px solid #39739d;
+            /*background: linear-gradient(180deg, rgba(255,255,255,1) 12%, rgba(209,239,255,1) 100%);*/
+            /*background-color: rgb(209,239,255);*/
+            background-color: #e1ecf4;
+        }
+
+        .pre-content-alert-image-information {
+            background-repeat: no-repeat;
+            width: 16px;
+            height: 16px;
+            display: inline-block;
+            margin-right: 6px;
+            vertical-align:middle;
+            background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQBAMAAADt3eJSAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAMFBMVEUAAADC0NxgkLcgZJoATozw8/ZQhbAAUZEAY7IAcMkAeNcwb6EAW6MAddL///////8+qcZNAAAAAXRSTlMAQObYZgAAAAFiS0dEDxi6ANkAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAAHdElNRQflAxQMCDD1nNlJAAAAV0lEQVQI12NgYBAycVZkAIKwilkr21MZGFj33Fq1au3pAAa2U6vWvVq1JoFB/BaIsbaQQWMVGDQxWK4CiayazOAFYSxBMOBSGhBGE0I73EC4FXBLYc4AAJDbQkcK4XJeAAAAJXRFWHRkYXRlOmNyZWF0ZQAyMDIxLTAzLTIwVDEyOjA4OjQ3KzAwOjAww7cw4QAAACV0RVh0ZGF0ZTptb2RpZnkAMjAyMS0wMy0yMFQxMjowODo0NyswMDowMLLqiF0AAAAASUVORK5CYII=');
+        }
+
+        .pre-content-alert-text-information {
+            vertical-align:middle;
+            font-weight: normal;
+            font-size: 14px;
+            color: #39739d;
+        }
+
+        .pre-content-alert-error {
+            padding-top: 3px;
+            padding-bottom: 5px;
+            padding-left: 5px;
+            padding-right: 5px;
+            margin-bottom: 10px;
+            border: 1px solid #721C24;
+            /*background: linear-gradient(180deg, rgba(255,255,255,1) 12%, rgba(209,239,255,1) 100%);*/
+            /*background-color: rgb(209,239,255);*/
+            background-color: #F8D7DA;
+        }
+
+        .pre-content-alert-image-error { /* Red */
+            background-repeat: no-repeat;
+            width: 16px;
+            height: 16px;
+            display: inline-block;
+            margin-right: 6px;
+            vertical-align:middle;
+            background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAMAAAAoLQ9TAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAM1BMVEUAAADjvLfGd2uwQTClJhPBal2qJxPLMBXiNhbwOhe1Tj+8LBTrORfzX0P////5taj///9ex7kGAAAAAXRSTlMAQObYZgAAAAFiS0dEEJWyDSwAAAAJcEhZcwAADsQAAA7EAZUrDhsAAAAHdElNRQflBRsJJyVbtSLSAAAAYUlEQVQY02VPyREAIQhDRBQF6b/b9frskAdDCEcAWEiYiTImeChcm0irXC7vQ+VARz/6ELsFk7F6EqtN39ynKSfAulN/oSLkdkQ/XFoGktt+x4RiIYyEpeFsMBatx+f+738QbAelah2KdAAAACV0RVh0ZGF0ZTpjcmVhdGUAMjAyMS0wNS0yN1QwOTozOTozNiswMDowMAPGksAAAAAldEVYdGRhdGU6bW9kaWZ5ADIwMjEtMDUtMjdUMDk6Mzk6MzYrMDA6MDBymyp8AAAAAElFTkSuQmCC');
+        }
+
+        .pre-content-alert-text-error {
+            vertical-align:middle;
+            font-weight: normal;
+            font-size: 14px;
+            color: #721C24;
+        }
+
+        .pre-content-alert-warning { /* Amber */
+            padding-top: 3px;
+            padding-bottom: 5px;
+            padding-left: 5px;
+            padding-right: 5px;
+            margin-bottom: 10px;
+            border: 1px solid #856404;
+            /*background: linear-gradient(180deg, rgba(255,255,255,1) 12%, rgba(209,239,255,1) 100%);*/
+            /*background-color: rgb(209,239,255);*/
+            background-color: #FFF3CD;
+        }
+
+        .pre-content-alert-image-warning {
+            background-repeat: no-repeat;
+            width: 16px;
+            height: 16px;
+            display: inline-block;
+            margin-right: 6px;
+            vertical-align:middle;
+            background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQBAMAAADt3eJSAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAIVBMVEUAAAD/7sH/+/D+zQD/uQD/wSD84QD83wAAAAD91gD///+RdSDdAAAAAXRSTlMAQObYZgAAAAFiS0dECmjQ9FYAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAAHdElNRQflBRsJIihYc6oqAAAAYUlEQVQI12NgYGBgFGCAAGUjKEPEEUIzBZsqgBmMbiUQRapmyUEQJRntjhAlGW1gRYxuGW1gRapmGW1gRSJpGW3pjiAlaUAAVMToBhRJAypSNQMxgIpMZoKBM0OICxi4AgC5GRmzSdeRMAAAACV0RVh0ZGF0ZTpjcmVhdGUAMjAyMS0wNS0yN1QwOTozNDozOCswMDowMKYHYi0AAAAldEVYdGRhdGU6bW9kaWZ5ADIwMjEtMDUtMjdUMDk6MzQ6MzgrMDA6MDDXWtqRAAAAAElFTkSuQmCC');
+        }
+
+        .pre-content-alert-text-warning {
+            vertical-align:middle;
+            font-weight: normal;
+            font-size: 14px;
+            color: #856404;
+        }
+
+        table {
+            border: 0px;
+            border-collapse: collapse;
+        }
+    
+        th { 
+            padding: 5px;
+            border: 1px solid #aaa;
+            /*text-shadow: 0 1px 0 #fff;*/
+            /*background-image: linear-gradient(to bottom,#fff 0%,#e0e0e0 100%);*/
+            background-color: #e0e0e0;
+        }
+
+        tr:nth-child(odd) {
+            background-color:#ededed;
+        } 
+    
+        tr:nth-child(even) {
+            background-color: #FFFFFF;
+        }
+       
+        td {
+            border: 1px solid #aaa;
+            padding: 5px;
+        }
+
+        .table-cell-green {
+            background-color: #D4EDDA; color: #15572a;
+        }
+
+        .table-cell-amber {
+            background-color: #FFF3CD; color: #856404;
+        }
+
+        .table-cell-red {
+            background-color: #F8D7DA; color: #721C24;
+        }
+
+    </style>
+</head>
+
+<body>
+    <aside id='modal' class='modal'>
+        <div class='modal-content'>
+            <div class='modal-header'>
+                <span class='modal-close'>&times;</span>
+                <h2>{{CompanyName-ReportTitle}}</h2>
+            </div>
+            <div class='modal-body'>
+                <p>{{Computer Name: ThisPC}}</p>
+            </div>
+            <div class='modal-footer'>
+                <p>{{Report Version: ReportVersion}}</p>
+            </div>
+        </div>
+    </aside>
+
+    <aside id='company-logo'></aside>
+
+    <nav>
+        <button class='button-clicked' onclick="opentab('tab-hardware');navBtnClick(this);">💻 Hardware</button>
+        <button onclick="opentab('tab-os');navBtnClick(this);">🪟 OS</button>
+        <button onclick="opentab('tab-services');navBtnClick(this);">🛠️ Services</button>
+        <button onclick="opentab('tab-applications');navBtnClick(this);">📦 Applications</button>
+        <button onclick="opentab('tab-updates');navBtnClick(this);">🔄 Updates</button>
+        <button onclick="opentab('tab-eventlogs');navBtnClick(this);">📜 Event Logs</button>
+        <button onclick=openModal()>Report Information</button>
+    </nav> 
+
+    <section id='tab-hardware' class='tab'>
+        <h2>Hardware Details</h2>
+        <details>
+            <summary>BIOS</summary>
+             <!-- Hardware_BIOS -->
+        </details>
+        <details>
+            <summary>Battery</summary>
+            <!-- Hardware_Battery -->
+        </details>
+        <details>
+            <summary>CPU</summary>
+            <!-- Hardware_CPU-->
+        </details>
+        <details>
+            <summary>Memory</summary>
+            <!-- Hardware_RAM -->
+        </details>
+        <details>
+            <summary>Disk</summary>
+            <!-- Hardware_Disk -->
+        </details>
+        <details>
+            <summary>Printer</summary>
+            <!-- Hardware_Printer -->
+        </details>
+    </section>
+
+    <section id='tab-os' class='tab' style='display:none'>
+        <h2>OS Details</h2>
+        <details>
+            <summary>OS</summary>
+            <!-- OS_OS -->
+        </details>
+        <details>
+            <summary>TimeZone</summary>
+            <!-- OS_TimeZone -->
+        </details>
+        <details>
+            <summary>ShareFolder</summary>
+            <!-- OS_ShareFolder -->
+        </details>
+        <details>
+            <summary>ScheduleTask</summary>
+            <!-- OS_ScheduleTask -->
+        </details>
+    </section>
+
+    <section id='tab-services' class='tab' style='display:none'>
+        <h2>Services Details</h2>
+        <details>
+            <summary>Active and Automatic Services</summary>
+            <!-- Active_Automatic_Services -->
+        </details>
+        <details>
+            <summary>Active and Manual Services</summary>
+            <!-- Active_Manual_Services -->
+        </details>
+        <details>
+            <summary>Stop and Automatic Services</summary>
+            <!-- Stop_Automatic_Services -->
+        </details>
+        <details>
+            <summary>Stop and Manual Services</summary>
+            <!-- Stop_Manual_Services -->
+        </details>
+        <details>
+            <summary>Disable Services</summary>
+            <!-- Disable_Services -->
+        </details>
+    </section>
+
+    <section id='tab-applications' class='tab' style='display:none'>
+        <h2>Applications Details</h2>
+        <details>
+            <summary>Installed Applications</summary>
+            <!-- Application_InstalledApps -->
+        </details>
+    </section>
+
+    <section id='tab-updates' class='tab' style='display:none'>
+        <h2>Updates Details</h2>
+        <details>
+            <summary>Hot Fix</summary>
+            <!-- Updates_Hotfix -->
+        </details>
+        <details>
+            <summary>Last 20 Updates</summary>
+            <!-- Updates_Details -->
+        </details>
+    </section>
+
+    <section id='tab-eventlogs' class='tab' style='display:none'>
+        <h2>Event Logs Details</h2>
+        <details>
+            <summary>Event Log: Application</summary>
+            <!-- Event_Log_Application -->
+        </details>
+        <details>
+            <summary>Event Log: System</summary>
+            <!-- Event_Log_System -->
+        </details>
+    </section>
+
+    <script>
+        //HTML Cleanup : Remove Collections and Colection Groups <col> <colgroup> from DOM
+        var col = document.getElementsByTagName('col'), index;
+        for(index = col.length - 1; index >= 0; index--) 
+        { col[index].parentNode.removeChild(col[index]);
+        }
+        var colgroup = document.getElementsByTagName('colgroup'), index;
+        for(index = colgroup.length - 1; index >= 0; index--) 
+        { colgroup[index].parentNode.removeChild(colgroup[index]);
+        }
+
+        //Tab Button Function System : Displays and Hides Tab Sections on Nav Button Click
+        function opentab(tabName) 
+        { var i;
+          var x = document.getElementsByClassName('tab');
+          for(i = 0; i < x.length; i++) 
+          { x[i].style.display = 'none';  
+          }
+          document.getElementById(tabName).style.display = 'block'; 
+        }
+
+        //Nav Button Click Function : Toggles Pressed / De-Pressed Visual State of button by adding or removing css class
+        function navBtnClick(elem) 
+        { var btn = document.getElementsByTagName('button');
+          for(i = 0; i < btn.length; i++) 
+          { btn[i].classList.remove('button-clicked')
+          }
+          elem.classList.add('button-clicked');
+        }
+
+        //Modal (Report Information Button) : Display Modal on Button Click
+        var modal = document.getElementById('modal');
+        function openModal()
+        { modal.style.display = 'block';
+        }
+        var modalClose = document.getElementsByClassName('modal-close')[0];
+        modalClose.onclick = function() 
+        { modal.style.display = 'none';
+        }
+        window.onclick = function(event) 
+        { if(event.target == modal) 
+          { modal.style.display = 'none';
+          }
+        }
+        modal.style.display = 'block';
+
+        // Custom Scripts: --> CPU Usage Table Update : Set cell colour based on % Usage
+        var rows  = document.getElementsByTagName('table')[2].rows; // 6th Table from top, Index [4]
+        var columnName = rows[0].cells[5]
+        if( columnName.innerHTML === 'LoadPercentage')
+        { var cell = rows[rows.length -1].cells[5]
+          var usage  = cell.innerHTML; // 5th cell from left, Index [4]
+                if (usage < 70)                 { cell.classList.add('table-cell-green');};
+                if (usage >= 70 && usage < 90)  { cell.classList.add('table-cell-amber');};
+                if (usage >= 90)                { cell.classList.add('table-cell-red')  ;};
+        }
+        else 
+        { alert ('The Disk Table has changed position and will not be colour coded. Please contact the author of this report to resolve the problem.' + columnName + " | " + usage );
+        }
+
+        // Custom Scripts: --> Disk Space Table Update : Set cell colour based on % Free Space
+        var rows  = document.getElementsByTagName('table')[3].rows; // 6th Table from top, Index [4]
+        var columnName = rows[0].cells[3]
+        if( columnName.innerHTML === 'MemoryUsage(%)')
+        { var cell = rows[rows.length -1].cells[3]
+          var usage  = cell.innerHTML; // 5th cell from left, Index [4]
+                if (usage < 70)                 { cell.classList.add('table-cell-green');};
+                if (usage >= 70 && usage < 90)  { cell.classList.add('table-cell-amber');};
+                if (usage >= 90)                { cell.classList.add('table-cell-red')  ;};
+        }
+        else 
+        { alert ('The Disk Table has changed position and will not be colour coded. Please contact the author of this report to resolve the problem.' + columnName + " | " + usage );
+        }
+
+        // Custom Scripts: --> Memory Space Table Update : Set cell colour based on % Free Space
+        var rows  = document.getElementsByTagName('table')[4].rows; // 6th Table from top, Index [4]
+        var columnName = rows[0].cells[4]
+        if( columnName.innerHTML === 'DiskUsage(%)')
+        { for(let i = 1; i < rows.length; i++) 
+          { var cell = rows[i].cells[4]
+            var usage  = cell.innerHTML; // 5th cell from left, Index [4]
+                if (usage < 70)                 { cell.classList.add('table-cell-green');};
+                if (usage >= 70 && usage < 90)  { cell.classList.add('table-cell-amber');};
+                if (usage >= 90)                { cell.classList.add('table-cell-red')  ;};
+          }
+        }
+        else 
+        { alert ('The Disk Table has changed position and will not be colour coded. Please contact the author of this report to resolve the problem.' + columnName + " | " + usage );
+        }
+
+    // Custom Scripts: --> event log Table Update : Set cell colour based on error critical warning
+    document.addEventListener('DOMContentLoaded', function() {
+        var eventLogSection = document.getElementById('tab-eventlogs');
+        var table = eventLogSection.getElementsByTagName('table')[0];
+        if (table) {
+            var rows = table.rows;
+            var columnName = rows[0].cells[2];
+            if (columnName.innerHTML === 'LevelDisplayName') {
+                for (let i = 1; i < rows.length; i++) {
+                    var cell = rows[i].cells[2];
+                    var value = cell.innerHTML;
+                    if (value === 'Critical') { cell.classList.add('table-cell-red'); }
+                    if (value === 'Error') { cell.classList.add('table-cell-red'); }
+                    if (value === 'Warning') { cell.classList.add('table-cell-amber'); }
+                }
+            } else {
+                alert('The Disk Table has changed position and will not be colour coded. Please contact the author of this report to resolve the problem.' + columnName.innerHTML);
+            }
+        } else {
+            console.error('No table found in the tab-eventlogs section.');
+        }
+    });
+
+    </script>
+</body>
+</html>
