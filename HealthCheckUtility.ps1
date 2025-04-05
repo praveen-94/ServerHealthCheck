@@ -113,9 +113,9 @@ function Update-ServerData
     $Runspace = [RunspaceFactory]::CreateRunspace()
     $Runspace.Open()
     $PSInstance = [PowerShell]::Create().AddScript({
-            param ($Servers, $Config, $ScriptDir)
-            & "$ScriptDir\Scripts\HealthCheck.ps1" -Servers $Servers -PathFile $Config
-        }).AddArgument($Servers).AddArgument($Config).AddArgument($ScriptDir)
+            param ($Servers, $Config, $ScriptDir, $LogHCU, $ErrorLogHCU)
+            & "$ScriptDir\Scripts\HealthCheck.ps1" -Servers $Servers -PathFile $Config -LogHCU $LogHCU -ErrorLogHCU $ErrorLogHCU
+        }).AddArgument($Servers).AddArgument($Config).AddArgument($ScriptDir).AddArgument($LogHCU).AddArgument($ErrorLogHCU)
     $PSInstance.Runspace = $Runspace
     $Handle = $PSInstance.BeginInvoke()
 

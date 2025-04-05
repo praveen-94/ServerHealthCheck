@@ -84,7 +84,7 @@
             text-align: right;
         }
 
-        #company-logo {
+        .company-logo {
             position: absolute;
             background-repeat: no-repeat;
             width: 127px;
@@ -180,7 +180,7 @@
             display: inline-block;
             margin-right: 6px;
             vertical-align:middle;
-            background-image: url('.\Images\logo1.png');
+            background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQBAMAAADt3eJSAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAMFBMVEUAAADC0NxgkLcgZJoATozw8/ZQhbAAUZEAY7IAcMkAeNcwb6EAW6MAddL///////8+qcZNAAAAAXRSTlMAQObYZgAAAAFiS0dEDxi6ANkAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAAHdElNRQflAxQMCDD1nNlJAAAAV0lEQVQI12NgYBAycVZkAIKwilkr21MZGFj33Fq1au3pAAa2U6vWvVq1JoFB/BaIsbaQQWMVGDQxWK4CiayazOAFYSxBMOBSGhBGE0I73EC4FXBLYc4AAJDbQkcK4XJeAAAAJXRFWHRkYXRlOmNyZWF0ZQAyMDIxLTAzLTIwVDEyOjA4OjQ3KzAwOjAww7cw4QAAACV0RVh0ZGF0ZTptb2RpZnkAMjAyMS0wMy0yMFQxMjowODo0NyswMDowMLLqiF0AAAAASUVORK5CYII=');
         }
 
         .pre-content-alert-text-information {
@@ -209,7 +209,7 @@
             display: inline-block;
             margin-right: 6px;
             vertical-align:middle;
-            background-image: url('.\Images\logo1.png'); 
+            background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAMAAAAoLQ9TAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAM1BMVEUAAADjvLfGd2uwQTClJhPBal2qJxPLMBXiNhbwOhe1Tj+8LBTrORfzX0P////5taj///9ex7kGAAAAAXRSTlMAQObYZgAAAAFiS0dEEJWyDSwAAAAJcEhZcwAADsQAAA7EAZUrDhsAAAAHdElNRQflBRsJJyVbtSLSAAAAYUlEQVQY02VPyREAIQhDRBQF6b/b9frskAdDCEcAWEiYiTImeChcm0irXC7vQ+VARz/6ELsFk7F6EqtN39ynKSfAulN/oSLkdkQ/XFoGktt+x4RiIYyEpeFsMBatx+f+738QbAelah2KdAAAACV0RVh0ZGF0ZTpjcmVhdGUAMjAyMS0wNS0yN1QwOTozOTozNiswMDowMAPGksAAAAAldEVYdGRhdGU6bW9kaWZ5ADIwMjEtMDUtMjdUMDk6Mzk6MzYrMDA6MDBymyp8AAAAAElFTkSuQmCC');
         }
 
         .pre-content-alert-text-error {
@@ -238,7 +238,7 @@
             display: inline-block;
             margin-right: 6px;
             vertical-align:middle;
-            background-image: url('.\Images\logo1.png'); 
+            background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQBAMAAADt3eJSAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAIVBMVEUAAAD/7sH/+/D+zQD/uQD/wSD84QD83wAAAAD91gD///+RdSDdAAAAAXRSTlMAQObYZgAAAAFiS0dECmjQ9FYAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAAHdElNRQflBRsJIihYc6oqAAAAYUlEQVQI12NgYGBgFGCAAGUjKEPEEUIzBZsqgBmMbiUQRapmyUEQJRntjhAlGW1gRYxuGW1gRapmGW1gRSJpGW3pjiAlaUAAVMToBhRJAypSNQMxgIpMZoKBM0OICxi4AgC5GRmzSdeRMAAAACV0RVh0ZGF0ZTpjcmVhdGUAMjAyMS0wNS0yN1QwOTozNDozOCswMDowMKYHYi0AAAAldEVYdGRhdGU6bW9kaWZ5ADIwMjEtMDUtMjdUMDk6MzQ6MzgrMDA6MDDXWtqRAAAAAElFTkSuQmCC');
         }
 
         .pre-content-alert-text-warning {
@@ -310,6 +310,7 @@
     <nav>
         <button class='button-clicked' onclick="opentab('tab-hardware');navBtnClick(this);">💻 Hardware</button>
         <button onclick="opentab('tab-os');navBtnClick(this);">🪟 OS</button>
+        <button onclick="opentab('tab-user');navBtnClick(this);">🧑‍💻 Users</button>
         <button onclick="opentab('tab-services');navBtnClick(this);">🛠️ Services</button>
         <button onclick="opentab('tab-applications');navBtnClick(this);">📦 Applications</button>
         <button onclick="opentab('tab-updates');navBtnClick(this);">🔄 Updates</button>
@@ -362,6 +363,26 @@
         <details>
             <summary>ScheduleTask</summary>
             <!-- OS_ScheduleTask -->
+        </details>
+    </section>
+
+    <section id='tab-user' class='tab' style='display:none'>
+        <h2>Users Details</h2>
+        <details>
+            <summary>Local Users</summary>
+            <!-- Users_User -->
+        </details>
+        <details>
+            <summary>Users in Administrator Group</summary>
+            <!-- Users_admin -->
+        </details>
+        <details>
+            <summary>RDP Users</summary>
+            <!-- Users_RDP -->
+        </details>
+        <details>
+            <summary>Local Groups</summary>
+            <!-- Users_Groups -->
         </details>
     </section>
 
@@ -468,7 +489,7 @@
         modal.style.display = 'block';
 
         // Custom Scripts: --> CPU Usage Table Update : Set cell colour based on % Usage
-        var rows  = document.getElementsByTagName('table')[2].rows; // 6th Table from top, Index [4]
+        var rows = document.getElementsByTagName('table')[2].rows; // 6th Table from top, Index [4]
         var columnName = rows[0].cells[5]
         if( columnName.innerHTML === 'LoadPercentage')
         { var cell = rows[rows.length -1].cells[5]
@@ -482,7 +503,7 @@
         }
 
         // Custom Scripts: --> Disk Space Table Update : Set cell colour based on % Free Space
-        var rows  = document.getElementsByTagName('table')[3].rows; // 6th Table from top, Index [4]
+        var rows = document.getElementsByTagName('table')[3].rows; // 6th Table from top, Index [4]
         var columnName = rows[0].cells[3]
         if( columnName.innerHTML === 'MemoryUsage(%)')
         { var cell = rows[rows.length -1].cells[3]
@@ -496,7 +517,7 @@
         }
 
         // Custom Scripts: --> Memory Space Table Update : Set cell colour based on % Free Space
-        var rows  = document.getElementsByTagName('table')[4].rows; // 6th Table from top, Index [4]
+        var rows = document.getElementsByTagName('table')[4].rows; // 6th Table from top, Index [4]
         var columnName = rows[0].cells[4]
         if( columnName.innerHTML === 'DiskUsage(%)')
         { for(let i = 1; i < rows.length; i++) 
@@ -511,28 +532,55 @@
         { alert ('The Disk Table has changed position and will not be colour coded. Please contact the author of this report to resolve the problem.' + columnName + " | " + usage );
         }
 
-    // Custom Scripts: --> event log Table Update : Set cell colour based on error critical warning
-    document.addEventListener('DOMContentLoaded', function() {
-        var eventLogSection = document.getElementById('tab-eventlogs');
-        var table = eventLogSection.getElementsByTagName('table')[0];
-        if (table) {
-            var rows = table.rows;
+        //Custom Scripts: --> event log Table Update : Set cell colour based on error critical warning
+        document.addEventListener('DOMContentLoaded', function() 
+        { var eventLogSection = document.getElementById('tab-eventlogs');
+          var table = eventLogSection.getElementsByTagName('table')[0];
+          if(table) 
+          { var rows = table.rows;
             var columnName = rows[0].cells[2];
-            if (columnName.innerHTML === 'LevelDisplayName') {
-                for (let i = 1; i < rows.length; i++) {
-                    var cell = rows[i].cells[2];
-                    var value = cell.innerHTML;
-                    if (value === 'Critical') { cell.classList.add('table-cell-red'); }
-                    if (value === 'Error') { cell.classList.add('table-cell-red'); }
-                    if (value === 'Warning') { cell.classList.add('table-cell-amber'); }
-                }
-            } else {
-                alert('The Disk Table has changed position and will not be colour coded. Please contact the author of this report to resolve the problem.' + columnName.innerHTML);
+            if(columnName.innerHTML === 'LevelDisplayName') 
+            { for(let i = 1; i < rows.length; i++) 
+              { var cell = rows[i].cells[2];
+                var value = cell.innerHTML;
+                if(value === 'Critical') { cell.classList.add('table-cell-red'); }
+                if(value === 'Error') { cell.classList.add('table-cell-red'); }
+                if(value === 'Warning') { cell.classList.add('table-cell-amber'); }
+              }
             }
-        } else {
-            console.error('No table found in the tab-eventlogs section.');
-        }
-    });
+            else 
+            { alert('The Disk Table has changed position and will not be colour coded. Please contact the author of this report to resolve the problem.' + columnName.innerHTML);
+            }
+          }
+          else 
+          { console.error('No table found in the tab-eventlogs section.');
+          }
+        });
+
+        //Custom Scripts: --> event log Table Update : Set cell colour based on error critical warning
+        document.addEventListener('DOMContentLoaded', function() 
+        { var eventLogSection = document.getElementById('tab-eventlogs');
+          var table = eventLogSection.getElementsByTagName('table')[1];
+          if(table) 
+          { var rows = table.rows;
+            var columnName = rows[0].cells[2];
+            if(columnName.innerHTML === 'LevelDisplayName') 
+            { for(let i = 1; i < rows.length; i++) 
+              { var cell = rows[i].cells[2];
+                var value = cell.innerHTML;
+                if(value === 'Critical') { cell.classList.add('table-cell-red'); }
+                if(value === 'Error') { cell.classList.add('table-cell-red'); }
+                if(value === 'Warning') { cell.classList.add('table-cell-amber'); }
+              }
+            }
+            else 
+            { alert('The Disk Table has changed position and will not be colour coded. Please contact the author of this report to resolve the problem.' + columnName.innerHTML);
+            }
+          }
+          else 
+          { console.error('No table found in the tab-eventlogs section.');
+          }
+        });
 
     </script>
 </body>
