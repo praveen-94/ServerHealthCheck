@@ -1,7 +1,7 @@
 param([string[]]$Servers, $PathFile, $LogHCU, $ErrorLogHCU)
 
-Import-Module "$($PathFile.ModulePath)\UtilityModule.psm1"
-Import-Module "$($PathFile.ModulePath)\HtmlModule.psm1"
+Import-Module "$($PathFile.helperModulePath)\common_utils.psm1"
+Import-Module "$($PathFile.helperModulePath)\html_formatter.psm1"
 
 if(-not $Servers -or $Servers.Count -eq 0) 
 { Write-Host "No servers specified!"
@@ -18,7 +18,7 @@ function Get-ServerHealth
   { if(Test-Connection -ComputerName $ServerName -Count 1 -Quiet) 
     { $ReportTitle = "System Health Report"
       $OutputFile = "$($PathFiles.logPath)\HealthCheckReport_$($ServerName).html"
-      $TemplatePath = $PathFiles.HTMLFilePathHC
+      $TemplatePath = $PathFiles.HTMLTemplatePath
       
       $reportInfo = [PSCustomObject]@{
                Author  = "Praveen"

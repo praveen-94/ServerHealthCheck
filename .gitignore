@@ -1,0 +1,33 @@
+# PowerShell compiled files
+*.ps1~
+*.psm1~
+*.psd1~
+*.ps1xml
+*.pssc
+
+# VS Code settings
+.vscode/
+.history/
+
+# Logs and outputs
+logs/
+logs/*
+!logs/.gitkeep
+
+# Windows/PowerShell temp files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Backup files
+*.bak
+*.tmp
+
+# Module cache
+__pycache__/
+*.pyc
+
+# Misc
+*.DS_Store
+*.swp
+*.swo

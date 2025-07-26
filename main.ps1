@@ -1,7 +1,6 @@
-$ScriptDir = Split-Path $script:MyInvocation.MyCommand.Path
-Import-Module "$PSScriptRoot\Modules\UtilityModule.psm1"
+Import-Module "$PSScriptRoot\helper_modules\common_utils.psm1"
 
-$ConfigPath = "$ScriptDir\Configuration\Path.json"
+$ConfigPath = "$PSScriptRoot\config\Path.json"
 if(-not (Test-Path $ConfigPath)) 
 { Write-Log -Message "Error: Configuration file not found at $ConfigPath." -Level "ERROR" -LogPath $LogHCU -errorLog $ErrorLogHCU
   exit
@@ -11,10 +10,10 @@ else
 }
 
 #Create logs directory............................................................................................................................................
-$dirM = CreateFolder -FolderPath "$ScriptDir\Logs" -ActionType "Keep"
-$dirS = CreateFolder -FolderPath "$ScriptDir\Logs\Outputs" -ActionType "Archive" -DestinationPath "$ScriptDir\Logs"
-$LogHCU = "$($Config.logPath)\HealthCheckUtilityLog.txt"
-$ErrorLogHCU = "$($Config.logPath)\HealthCheckUtilityErrorLog.txt"
+$dirM = CreateFolder -FolderPath "$PSScriptRoot\logs" -ActionType "Keep"
+$dirS = CreateFolder -FolderPath "$PSScriptRoot\logs\Outputs" -ActionType "Archive" -DestinationPath "$PSScriptRoot\logs"
+$LogHCU = "$($Config.logPath)\serverVital.log"
+$ErrorLogHCU = "$($Config.logPath)\serverVitalError.log"
 
 Write-Log -Message "Health Check Utility started." -Level "INFO" -LogPath $LogHCU
 Write-Log -Message "Creating Main log directories:`n$($dirM)" -Level "INFO" -LogPath $LogHCU
@@ -113,9 +112,9 @@ function Update-ServerData
     $Runspace = [RunspaceFactory]::CreateRunspace()
     $Runspace.Open()
     $PSInstance = [PowerShell]::Create().AddScript({
-            param ($Servers, $Config, $ScriptDir, $LogHCU, $ErrorLogHCU)
-            & "$ScriptDir\Scripts\HealthCheck.ps1" -Servers $Servers -PathFile $Config -LogHCU $LogHCU -ErrorLogHCU $ErrorLogHCU
-        }).AddArgument($Servers).AddArgument($Config).AddArgument($ScriptDir).AddArgument($LogHCU).AddArgument($ErrorLogHCU)
+            param ($Servers, $Config, $PSScriptRoot, $LogHCU, $ErrorLogHCU)
+            & "$PSScriptRoot\core_scripts\HealthCheck.ps1" -Servers $Servers -PathFile $Config -LogHCU $LogHCU -ErrorLogHCU $ErrorLogHCU
+        }).AddArgument($Servers).AddArgument($Config).AddArgument($PSScriptRoot).AddArgument($LogHCU).AddArgument($ErrorLogHCU)
     $PSInstance.Runspace = $Runspace
     $Handle = $PSInstance.BeginInvoke()
 
