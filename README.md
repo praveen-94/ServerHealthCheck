@@ -1,12 +1,10 @@
 # ServerVitals Health Check Tool
 ---------------------------------------------------------------------------------------------------------------------------------------
 ## Overview
----------------------------------------------------------------------------------------------------------------------------------------
 ServerVitals Health Check Tool is a PowerShell-based tool for monitoring server health, exporting reports, and providing a dashboard UI. It supports CSV and HTML report generation, customizable configuration, and a user-friendly interface built with WPF XAML.
 
 ---------------------------------------------------------------------------------------------------------------------------------------
 ## Features
----------------------------------------------------------------------------------------------------------------------------------------
 - Import server lists from CSV files, Or fill it manually
 - Fetch and display server health data (CPU, Memory, Disk, Service Status)
 - Export health reports to CSV and HTML
@@ -16,7 +14,6 @@ ServerVitals Health Check Tool is a PowerShell-based tool for monitoring server 
 
 ---------------------------------------------------------------------------------------------------------------------------------------
 ## Project Structure
----------------------------------------------------------------------------------------------------------------------------------------
 ```
 ServerVitals_Tools/
 ├── config/                # Configuration files to display UI
@@ -52,18 +49,15 @@ ServerVitals_Tools/
 
 ---------------------------------------------------------------------------------------------------------------------------------------
 ## Logging
----------------------------------------------------------------------------------------------------------------------------------------
 Logs are saved in `logs/Outputs/`:
 - `HealthCheckUtilityLog.txt`: General operations
 - `HealthCheckUtilityErrorLog.txt`: Errors
 
 ---------------------------------------------------------------------------------------------------------------------------------------
 ## Exported Reports
----------------------------------------------------------------------------------------------------------------------------------------
 - CSV: `logs/Outputs/ServerHealthReport.csv`
 - HTML: `logs/Outputs/ServerHealthReport.html`
 
 ---------------------------------------------------------------------------------------------------------------------------------------
 ## Author
----------------------------------------------------------------------------------------------------------------------------------------
 Praveen Ahirwar
