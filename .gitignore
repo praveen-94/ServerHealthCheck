@@ -5,12 +5,21 @@
 *.ps1xml
 *.pssc
 
-# VS Code settings
+# Editor / assistant settings
 .vscode/
 .history/
 
-# Logs and outputs
-logs/
+# Local AI assistant guidance - not part of the shipped tool
+CLAUDE.md
+.claude/
+
+# Scratch file for composing commit messages (git commit -F commit-msg.txt)
+commit-msg.txt
+
+# Logs and outputs.
+# Ignore the CONTENTS, not the directory: an excluded directory is never descended into,
+# so "logs/" made the "!logs/.gitkeep" re-include impossible and the folder could never
+# be committed. Excluding "logs/*" instead leaves the negation able to take effect.
 logs/*
 !logs/.gitkeep
 

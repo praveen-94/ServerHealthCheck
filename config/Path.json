@@ -1,10 +1,8 @@
 {
     "logPath": ".\\logs\\Outputs",
+    "ServerReportFolder": "ServerReports",
     "helperModulePath": ".\\helper_modules",
-    "XAMLFilePath": ".\\config\\DashBoardUI.xaml",
     "InputCSVPath": ".\\config\\Inputs.csv",
     "CoreScriptsPath": ".\\core_scripts\\HealthCheck.ps1",
-    "HTMLTemplatePath": ".\\config\\ReportTemplate.html",
-    "CSVExportPath": ".\\logs\\Outputs\\ServerHealthReport.csv",
-    "HTMLExportPath": ".\\logs\\Outputs\\ServerHealthReport.html"
+    "HTMLTemplatePath": ".\\config\\ReportTemplate.html"
 }

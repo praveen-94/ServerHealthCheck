@@ -1,35 +1,51 @@
-# Description: This module contains utility functions that can be used in other scripts.
+﻿# Description: Shared utility functions for the ServerVitals scripts.
 
-#function to write log
-function Write-Log 
-{ param([string]$Message,[string]$Level = "GENERAL", [string]$LogPath, [string]$errorLog)
+# The one version string for the whole tool: main.ps1 stamps it on the banner and threads
+# it into the config so HealthCheck.ps1 stamps the same value on every report. A literal
+# in both files meant bumping one and shipping a banner and report that disagreed.
+$script:AppVersion = '1.0.0'
+function Get-AppVersion { return $script:AppVersion }
+
+# Level-based console colouring + UTF-8 file append.
+function Write-Log
+{ param([string]$Message,[string]$Level = "GENERAL", [string]$LogPath, [switch]$NoConsole)
   $Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-  if($Level -eq "ERROR" -or $Level -eq "FAILURE") 
-  { Write-Host "$Timestamp [$Level]: $Message" -ForegroundColor Red
-   "$Timestamp [$Level] $Message" | Out-File -FilePath $LogPath -Append
-   "$Timestamp [$Level] $Message" | Out-File -FilePath $errorLog -Append
+  # ONE log file: errors are tagged in the level column, so they are found by filtering
+  # it ("Select-String '\[ERROR\]'") rather than by opening a second file.
+  # -NoConsole writes the file only - main.ps1 uses it for lines it renders itself
+  # through Write-Status, so styled output isn't interleaved with raw echoes.
+  if($NoConsole)
+  { if($LogPath) { "$Timestamp [$Level]: $Message" | Out-File -FilePath $LogPath -Append -Encoding UTF8 }
+    return
   }
-  elseif($Level -eq "DEBUG" -or $Level -eq "WARNING") 
+  # $LogPath is guarded everywhere: Out-File throws on a blank path, so callers that omit
+  # it still get console output. The file format is "<ts> [<LEVEL>]: <msg>" for EVERY
+  # level - ERROR alone once dropped the colon, breaking any fixed-separator parse.
+  if($Level -eq "ERROR" -or $Level -eq "FAILURE")
+  { Write-Host "$Timestamp [$Level]: $Message" -ForegroundColor Red
+    if($LogPath) { "$Timestamp [$Level]: $Message" | Out-File -FilePath $LogPath -Append -Encoding UTF8 }
+  }
+  elseif($Level -eq "DEBUG" -or $Level -eq "WARNING")
   { Write-Host "$Timestamp [$Level]: $Message" -ForegroundColor Yellow
-   "$Timestamp [$Level]: $Message" | Out-File -FilePath $LogPath -Append
+    if($LogPath) { "$Timestamp [$Level]: $Message" | Out-File -FilePath $LogPath -Append -Encoding UTF8 }
   }
   elseif($Level -eq "SUCCESS")
   { Write-Host "$Message" -ForegroundColor Green
-   "$Timestamp [$Level]: $Message" | Out-File -FilePath $LogPath -Append
+    if($LogPath) { "$Timestamp [$Level]: $Message" | Out-File -FilePath $LogPath -Append -Encoding UTF8 }
   }
   elseif($Level -eq "INFO")
   { Write-Host "$Timestamp [$Level]: $Message"
-   "$Timestamp [$Level]: $Message" | Out-File -FilePath $LogPath -Append
+    if($LogPath) { "$Timestamp [$Level]: $Message" | Out-File -FilePath $LogPath -Append -Encoding UTF8 }
   }
-  else 
+  else
   { Write-Host "$Message"
-   "$Message" | Out-File -FilePath $LogPath -Append
+    if($LogPath) { "$Message" | Out-File -FilePath $LogPath -Append -Encoding UTF8 }
   }
 }
 
-#function to create folder
-function CreateFolder 
-{ param([Parameter(Mandatory=$true)][string]$FolderPath,[switch]$IncludeTimestamp,[ValidateSet("Replace", "Move", "Keep", "Archive")][string]$ActionType = "Replace", [string]$DestinationPath)
+# Folder setup with Keep/Replace/Move/Archive semantics, used for log rotation.
+function CreateFolder
+{ param([Parameter(Mandatory=$true)][string]$FolderPath,[switch]$IncludeTimestamp,[ValidateSet("Replace", "Move", "Keep", "Archive")][string]$ActionType = "Replace", [string]$DestinationPath, [string[]]$ItemFilter, [string[]]$FolderFilter)
  
   if($IncludeTimestamp) 
   { $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -50,12 +66,37 @@ function CreateFolder
       "Keep"    { Write-Output "Folder already exists. Keeping the existing folder."
                   return
                 }
-      "Archive" { if(-not $DestinationPath) 
+      "Archive" { if(-not $DestinationPath)
                   { throw "The 'DestinationPath' parameter is required when ActionType is 'Archive'."
                   }
 
+                  # Work out WHAT would move before creating anything to move it into:
+                  # creating Outputs_<timestamp> up front left an empty folder behind on
+                  # every run with nothing to archive, the first run included.
+                  # -ItemFilter (main.ps1 passes the tool's own artifact patterns) moves
+                  # ONLY those, so an -OutputPath holding the user's files is never swept.
+                  # No filter = move everything, safe for the tool-owned default folder.
+                  $Files = if($ItemFilter)
+                           { @($ItemFilter | ForEach-Object { Get-ChildItem -Path $FolderPath -Filter $_ -File -ErrorAction SilentlyContinue } |
+                               Sort-Object -Property FullName -Unique) }
+                           else
+                           { @(Get-ChildItem -Path $FolderPath -File) }
+                  # Folders we own (the report folder) are archived whole, matched by exact
+                  # name so nothing else is touched. An EMPTY one is left alone - moving it
+                  # only to recreate it immediately achieves nothing.
+                  $Folders = if($FolderFilter)
+                             { @(Get-ChildItem -Path $FolderPath -Directory -ErrorAction SilentlyContinue |
+                                 Where-Object { $FolderFilter -contains $_.Name } |
+                                 Where-Object { @(Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue).Count -gt 0 }) }
+                             else { @() }
+
+                  if($Files.Count -eq 0 -and $Folders.Count -eq 0)
+                  { Write-Output "Nothing to archive in: $FolderPath"
+                    return
+                  }
+
                   $ArchiveLogFolder = Join-Path -Path $DestinationPath -ChildPath "ArchiveLog"
-                  if(-not (Test-Path -Path $ArchiveLogFolder)) 
+                  if(-not (Test-Path -Path $ArchiveLogFolder))
                   { New-Item -Path $ArchiveLogFolder -ItemType Directory | Out-Null
                     Write-Output "Created ArchiveLog folder: $ArchiveLogFolder"
                   }
@@ -64,46 +105,20 @@ function CreateFolder
                   New-Item -Path $OutputsFolder -ItemType Directory | Out-Null
                   Write-Output "Created Outputs folder: $OutputsFolder"
 
-                  $Files = Get-ChildItem -Path $FolderPath -File
-                  if($Files.Count -eq 0) 
-                  { Write-Output "No files found in the source folder: $FolderPath"
-                    return
-                  }
-              
-                  foreach($File in $Files) 
+                  foreach($File in $Files)
                   { Write-Output "Moving file: $($File.Name)"
                     Move-Item -Path $File.FullName -Destination $OutputsFolder -Force
+                  }
+                  foreach($Folder in $Folders)
+                  { Write-Output "Moving folder: $($Folder.Name)"
+                    Move-Item -Path $Folder.FullName -Destination $OutputsFolder -Force
                   }
                   Write-Output "Moved old log files to archive folder: $OutputsFolder"
                 }
     }
   }
-  else 
+  else
   { New-Item -Path $FolderPath -ItemType Directory | Out-Null
-    Write-Output "Created folder: $FolderPath" 
-  }
-}
-
-#function to draw line
-function DrawLine 
-{ param([string]$LineChar = "-", [string]$LogFilePath, [switch]$LogToFile, [switch]$fixedWidth, [switch]$PrintInConsole)
-  if($fixedWidth) 
-  { $ConsoleWidth = 175
-  }
-  else 
-  { $ConsoleWidth = $Host.UI.RawUI.WindowSize.Width
-  }
-  
-  if($PrintInConsole) 
-  { $Line = $LineChar * $ConsoleWidth
-    Write-Output $Line
-  }
-
-  if($LogToFile) 
-  { if(-not $LogFilePath) 
-    { throw "The 'LogFilePath' parameter is required when LogToFile is specified."
-    }
-    $line2 = $LineChar * 175
-    Add-Content -Path $LogFilePath -Value $Line2
+    Write-Output "Created folder: $FolderPath"
   }
 }

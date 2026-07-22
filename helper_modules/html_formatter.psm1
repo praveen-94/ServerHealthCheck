@@ -1,4 +1,4 @@
-Function UpdateHTMLTableCells 
+﻿Function UpdateHTMLTableCells 
 { Param([Parameter(Mandatory = $True, ValueFromPipeline = $True)][string] $HTML)
   $CustomLogic = @{
         "Stopped"  = ' style="background-color: #F8D7DA; color: #721C24;">Stopped<'
