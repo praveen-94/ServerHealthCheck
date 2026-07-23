@@ -3,7 +3,9 @@
 ## Overview
 ServerVitals is a **console** tool that checks the health of one or more Windows machines and produces two kinds of output: a live, colour-coded terminal dashboard, and a detailed per-server HTML report.
 
-It is Windows-only — the checks use `Win32_*` WMI classes, `Get-WinEvent`, `Get-ScheduledTask`, `Get-Printer` and the `Microsoft.Update.Session` COM object — but it runs on **both Windows PowerShell 5.1 and PowerShell 7**.
+It is Windows-only — the checks use `Win32_*` CIM classes, `Get-WinEvent`, `Get-ScheduledTask`, `Get-Printer` and the `Microsoft.Update.Session` COM object — but it runs on **both Windows PowerShell 5.1 and PowerShell 7**.
+
+Metrics are gathered over a single **CIM session per host using DCOM**, which mirrors the transport the old `Get-WmiObject` used. That means **WinRM does not need to be enabled** on the target — unlike `Get-CimInstance -ComputerName`, which defaults to WS-Man.
 
 > Earlier versions were driven by a WPF/XAML window. That GUI has been removed in favour of the console interface: it required an STA apartment, which pinned the tool to Windows PowerShell 5.1.
 
