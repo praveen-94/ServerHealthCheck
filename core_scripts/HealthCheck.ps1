@@ -60,7 +60,13 @@ function Get-ServerHealth
     { Write-Log -Message "Failed to open CIM session to $($ServerName): $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU
     }
 
-    if($Pingable -or $null -ne $CimSession)
+    # Reachability has THREE outcomes, not two, because ping and the session answer different
+    # questions: ping says the box is on the network, the session says we can actually read
+    # something off it. Every check needs the session, so without one there is nothing to run.
+    # Carrying on with $CimSession = $null fed "Cannot bind argument to parameter 'CimSession'
+    # because it is null" to all 20 checks - twenty log lines naming a PowerShell binding
+    # failure, while the real cause sat buried twenty lines above them.
+    if($null -ne $CimSession)
     { $ReportTitle = "System Health Report"
       $ScanStarted = Get-Date
 
@@ -98,6 +104,15 @@ function Get-ServerHealth
           ([string]$Text).Replace('&','&amp;').Replace('<','&lt;').Replace('>','&gt;').Replace('"','&quot;')
       }
 
+      # Round and format a number with an INVARIANT decimal point, never the machine's locale
+      # separator. ConvertTo-Html renders a raw double via .ToString(), which on a comma-decimal
+      # host (de-DE etc.) emits "35,52" - and the dashboard's parseFloat reads that as 35, so
+      # the ,52 of every percentage and GB figure was silently dropped in the KPIs and the
+      # threshold colouring. A fixed dot keeps the whole report canonical, like the ISO dates.
+      $Num = { param($Value, [int]$Decimals = 2)
+          [math]::Round([double]$Value, $Decimals).ToString([System.Globalization.CultureInfo]::InvariantCulture)
+      }
+
       # A failed check and one with genuinely nothing to report both leave the fragment
       # $null, and an empty section cannot tell them apart. Substitute an explicit note.
       $Fragment = { param($Value, [string]$EmptyNote)
@@ -114,7 +129,7 @@ function Get-ServerHealth
       $html = $null
       try
       { if([string]::IsNullOrWhiteSpace([string]$TemplatePath)) { throw "No HTML template path was configured (HTMLTemplatePath)." }
-        $html = Get-Content $TemplatePath -Raw -Encoding UTF8
+        $html = Get-Content -LiteralPath $TemplatePath -Raw -Encoding UTF8
       }
       catch
       { Write-Log -Message "Failed to load HTML report template '$($TemplatePath)' for $($ServerName); the scan will continue without an HTML report: $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU
@@ -194,7 +209,7 @@ function Get-ServerHealth
       #Get CPU Usage
       try
       { $CPUDetails = Get-CimInstance -ClassName Win32_Processor -CimSession $CimSession -ErrorAction Stop
-        $CPUInfo = $CPUDetails | Select-Object -Property Name,Manufacturer,NumberOfCores,NumberOfLogicalProcessors,@{Name="ClockSpeed(GHz)"; Expression={$_.MaxClockSpeed/1000}},LoadPercentage | ConvertTo-Html -Fragment
+        $CPUInfo = $CPUDetails | Select-Object -Property Name,Manufacturer,NumberOfCores,NumberOfLogicalProcessors,@{Name="ClockSpeed(GHz)"; Expression={ & $Num ($_.MaxClockSpeed/1000) }},LoadPercentage | ConvertTo-Html -Fragment
         $HardWareCheck++
       }
       catch
@@ -206,9 +221,9 @@ function Get-ServerHealth
       { # Reuse the Win32_OperatingSystem instance from the OS section - it carries the memory
         # counters - and re-query only if that call failed.
         $MemoryDetails = if($OSDetails) { $OSDetails } else { Get-CimInstance -ClassName Win32_OperatingSystem -CimSession $CimSession -ErrorAction Stop }
-        $MemoryInfo = $MemoryDetails | Select-Object -Property @{Name="TotalMemory(GB)"; Expression={[math]::Round($_.TotalVisibleMemorySize/1MB, 2)}}, @{Name="FreeMemory(GB)"; Expression={[math]::Round($_.FreePhysicalMemory/1MB, 2)}},
-                    @{Name="UsedMemory(GB)"; Expression={[math]::Round(($_.TotalVisibleMemorySize - $_.FreePhysicalMemory)/1MB, 2)}},
-                    @{Name="MemoryUsage(%)"; Expression={[math]::Round((($_.TotalVisibleMemorySize - $_.FreePhysicalMemory)/$_.TotalVisibleMemorySize)*100, 2)}} | ConvertTo-Html -Fragment
+        $MemoryInfo = $MemoryDetails | Select-Object -Property @{Name="TotalMemory(GB)"; Expression={ & $Num ($_.TotalVisibleMemorySize/1MB) }}, @{Name="FreeMemory(GB)"; Expression={ & $Num ($_.FreePhysicalMemory/1MB) }},
+                    @{Name="UsedMemory(GB)"; Expression={ & $Num (($_.TotalVisibleMemorySize - $_.FreePhysicalMemory)/1MB) }},
+                    @{Name="MemoryUsage(%)"; Expression={ & $Num ((($_.TotalVisibleMemorySize - $_.FreePhysicalMemory)/$_.TotalVisibleMemorySize)*100) }} | ConvertTo-Html -Fragment
         $HardWareCheck++
       }
       catch
@@ -222,9 +237,9 @@ function Get-ServerHealth
         # zero-size drives too (empty optical / card-reader slots): the usage maths below
         # divides by Size, and one divide-by-zero takes out the whole disk table.
         $Disk = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DriveType=3" -CimSession $CimSession -ErrorAction Stop | Where-Object { $_.Size -gt 0 }
-        $DiskInfo = $Disk | Select-Object -Property DeviceID, VolumeName, @{Name="TotalDisk(GB)"; Expression={[math]::Round($_.Size/1GB, 2)}}, @{Name="FreeDisk(GB)"; Expression={[math]::Round($_.FreeSpace/1GB, 2)}},
-                  @{Name="UsedDisk(GB)"; Expression={[math]::Round(($_.Size - $_.FreeSpace)/1GB, 2)}},
-                  @{Name="DiskUsage(%)"; Expression={[math]::Round((($_.Size - $_.FreeSpace)/$_.Size)*100, 2)}} | ConvertTo-Html -Fragment
+        $DiskInfo = $Disk | Select-Object -Property DeviceID, VolumeName, @{Name="TotalDisk(GB)"; Expression={ & $Num ($_.Size/1GB) }}, @{Name="FreeDisk(GB)"; Expression={ & $Num ($_.FreeSpace/1GB) }},
+                  @{Name="UsedDisk(GB)"; Expression={ & $Num (($_.Size - $_.FreeSpace)/1GB) }},
+                  @{Name="DiskUsage(%)"; Expression={ & $Num ((($_.Size - $_.FreeSpace)/$_.Size)*100) }} | ConvertTo-Html -Fragment
         $HardWareCheck++
       }
       catch
@@ -461,7 +476,14 @@ function Get-ServerHealth
       try
       { $AppEvtArgs = @{ FilterHashtable = @{ LogName = 'Application'; Level = 1, 2; StartTime = $StartDate }; MaxEvents = 20; ComputerName = $ServerName; ErrorAction = 'Stop' }
         if($UseCred) { $AppEvtArgs.Credential = $Credential }
-        $AEvent = Get-WinEvent @AppEvtArgs | Select-Object -Property TimeCreated, Id, LevelDisplayName, ProviderName, Message | ConvertTo-Html -Fragment -PreContent $PreContent
+        # Emit TimeCreated as a fixed yyyy-MM-dd HH:mm:ss string, NOT the raw DateTime.
+        # ConvertTo-Html renders a DateTime via .ToString(), which is locale-dependent
+        # (20-07-2026 here, 7/20/2026 in the US, 20.07.2026 in Germany), and the dashboard's
+        # error histogram then has to guess the field order from the digits - it sorted US
+        # dates into the wrong months and couldn't split the German form at all. A fixed
+        # ISO-style string sorts correctly everywhere; the separators are literals, so the
+        # format is itself culture-independent.
+        $AEvent = Get-WinEvent @AppEvtArgs | Select-Object -Property @{Name='TimeCreated';Expression={ $_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss') }}, Id, LevelDisplayName, ProviderName, Message | ConvertTo-Html -Fragment -PreContent $PreContent
         $EventLogCheck++
       }
       catch
@@ -479,7 +501,8 @@ function Get-ServerHealth
       try
       { $SysEvtArgs = @{ FilterHashtable = @{ LogName = 'System'; Level = 1, 2; StartTime = $StartDate }; MaxEvents = 20; ComputerName = $ServerName; ErrorAction = 'Stop' }
         if($UseCred) { $SysEvtArgs.Credential = $Credential }
-        $SEvent = Get-WinEvent @SysEvtArgs | Select-Object -Property TimeCreated, Id, LevelDisplayName, ProviderName, Message | ConvertTo-Html -Fragment -PreContent $PreContent
+        # Fixed yyyy-MM-dd HH:mm:ss, as for the Application log above - see the note there.
+        $SEvent = Get-WinEvent @SysEvtArgs | Select-Object -Property @{Name='TimeCreated';Expression={ $_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss') }}, Id, LevelDisplayName, ProviderName, Message | ConvertTo-Html -Fragment -PreContent $PreContent
         $EventLogCheck++
       }
       catch
@@ -580,9 +603,17 @@ function Get-ServerHealth
             }
     }
     else
-    { return [PSCustomObject]@{
+    { # Answered ping but refused WMI: the host is up, we just cannot see into it. Say so and
+      # name the fix, rather than reporting it Offline (a lie - it replied) or Online with
+      # everything failed (also a lie - nothing was ever read).
+      if($Pingable)
+      { Write-Log -Message ("$($ServerName) responded to ping but no WMI/DCOM session could be opened, so no check could run. " +
+                            "On the target, allow 'Windows Management Instrumentation (WMI)' through the firewall and confirm the account used is an administrator there.") `
+                  -Level "ERROR" -LogPath $LogHCU
+      }
+      return [PSCustomObject]@{
                 Server             = $ServerName
-                Status             = "Offline"
+                Status             = if($Pingable) { "Unreachable" } else { "Offline" }
                 HardWare_Check     = "N/A"
                 OS_Check           = "N/A"
                 Users_Check        = "N/A"

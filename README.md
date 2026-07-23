@@ -164,7 +164,7 @@ ServerHealthCheck/
 ---
 
 ## Notes
-- A host is reported **Offline** only when both the ping *and* the WMI connection fail, so a machine that blocks ICMP but allows WMI is still scanned.
+- Reachability has three outcomes. A host is **Online** once a WMI/DCOM session opens (so a machine that blocks ICMP but allows WMI is still scanned). It is **Unreachable** when it answers ping but the session can't be opened — usually the WMI/DCOM firewall rule is closed, or the account isn't an administrator there; the log names the fix. It is **Offline** only when both the ping *and* the session fail. A scan that runs but exceeds `-TimeoutSeconds` is reported **Timeout**.
 - The overall result reads `Yes` only when all sub-checks pass; a single unavailable feature downgrades the host to `Check File`. On client editions of Windows this is common — for example, Windows Home has no *Remote Desktop Users* group.
 - Remote Windows Update history relies on DCOM COM activation being permitted on the target (often blocked) and always uses the caller's identity, not `-Credential`.
 

@@ -370,18 +370,26 @@ function Write-ScanProgress
 }
 
 function Write-ScanResult
-{ param([string]$Server, [string]$Status, [double]$Elapsed)
+{ param([string]$Server, [string]$Status, [double]$Elapsed, [int]$Index = 1, [int]$Total = 1)
   # Erase exactly what was drawn - see $script:TransientLines.
   if($script:TransientLines -gt 0) { Clear-TransientBlock -Lines $script:TransientLines }
   $script:TransientLines = 0
+  # Padded to the longest word ('unreachable'), or the elapsed time no longer lines up down
+  # the column - every other status happens to be 7 characters, so this only showed up once
+  # a longer one existed.
   switch($Status)
-  { 'Online'  { $icon = Paint '●' 'Green';  $st = Paint 'online'  'Green' }
-    'Offline' { $icon = Paint '○' 'Gray';   $st = Paint 'offline' 'Gray' }
-    'Timeout' { $icon = Paint '◷' 'Yellow'; $st = Paint 'timeout' 'Yellow' }
-    default   { $icon = Paint '✗' 'Red';    $st = Paint 'error'   'Red' }
+  { 'Online'      { $icon = Paint '●' 'Green';  $word = 'online';      $col = 'Green' }
+    'Offline'     { $icon = Paint '○' 'Gray';   $word = 'offline';     $col = 'Gray' }
+    'Unreachable' { $icon = Paint '○' 'Yellow'; $word = 'unreachable'; $col = 'Yellow' }
+    'Timeout'     { $icon = Paint '◷' 'Yellow'; $word = 'timeout';     $col = 'Yellow' }
+    default       { $icon = Paint '✗' 'Red';    $word = 'error';       $col = 'Red' }
   }
-  # Same width budget as the progress line: same column, and no wrap on a long FQDN.
-  $name  = Format-Cell -Text $Server -Width (Get-ScanNameWidth) -Color 'White'
+  $st = Format-Cell -Text $word -Width 11 -Color $col
+  # Same width budget as the progress line, computed from the SAME Index/Total, so the
+  # permanent line lands in the same column. Without them Get-ScanNameWidth budgeted for
+  # "[1/1]" while the progress line budgeted for the real "[i/n]", and on a narrow console
+  # the two lines sat in different columns.
+  $name  = Format-Cell -Text $Server -Width (Get-ScanNameWidth -Index $Index -Total $Total) -Color 'White'
   $timer = Paint ("{0,5:0.0}s" -f $Elapsed) 'Dim'
   Write-Permanent ($script:Gutter + $icon + $script:Gap + $name + ' ' + $st + '   ' + $timer)
 }
@@ -409,15 +417,16 @@ function Show-SummaryTable
   $serverW = 6
   foreach($r in $Results) { if(([string]$r.Server).Length -gt $serverW) { $serverW = ([string]$r.Server).Length } }
   # Cap SERVER so a long FQDN can't push the table past the console width. Every other
-  # column is fixed, so the non-server width is a constant 69 (STATUS 7 + seven 3-wide
+  # column is fixed, so the non-server width is a constant 73 (STATUS 11 + seven 3-wide
   # checks + RESULT 10, each +2 padding, plus 11 borders) with one extra space on the
   # leading column. SERVER takes what's left, never below 6; Format-Cell truncates.
-  $maxServerW = [math]::Max(6, (Get-UIWidth) - 70 - $script:Gutter.Length)
+  $maxServerW = [math]::Max(6, (Get-UIWidth) - 74 - $script:Gutter.Length)
   if($serverW -gt $maxServerW) { $serverW = $maxServerW }
 
   $cols = @(
     @{ H = 'SERVER'; W = $serverW; A = 'left';   K = 'Server' }
-    @{ H = 'STATUS'; W = 7;        A = 'left';   K = 'Status' }
+    # 11 wide: 'Unreachable' is the longest status and must not be ellipsised into 'Unr…ble'.
+    @{ H = 'STATUS'; W = 11;       A = 'left';   K = 'Status' }
     @{ H = 'HW';     W = 3;        A = 'center'; K = 'HardWare_Check' }
     @{ H = 'OS';     W = 3;        A = 'center'; K = 'OS_Check' }
     @{ H = 'USR';    W = 3;        A = 'center'; K = 'Users_Check' }
@@ -454,7 +463,7 @@ function Show-SummaryTable
       { $m = Convert-Mark $raw; $txt = $m.Glyph; $col = $m.Color }
       elseif($c.K -eq 'Status')
       { $txt = $raw
-        $col = switch($raw) { 'Online' {'Green'} 'Offline' {'Gray'} 'Timeout' {'Yellow'} 'Error' {'Red'} default {'White'} }
+        $col = switch($raw) { 'Online' {'Green'} 'Offline' {'Gray'} 'Unreachable' {'Yellow'} 'Timeout' {'Yellow'} 'Error' {'Red'} default {'White'} }
       }
       elseif($c.K -eq 'All_Good')
       { $txt = $raw

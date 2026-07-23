@@ -805,6 +805,12 @@
         return 'ok';
     }
 
+    /* parseFloat only understands a dot decimal, so on a comma-locale report "35,52" read
+       back as 35 and dropped the fraction. HealthCheck.ps1 now emits an invariant dot, but a
+       stray comma is normalised here too as a safety net (for an older report, or a column
+       added later). Safe for these values - percentages and GHz carry no thousands separator. */
+    function num(v) { return parseFloat(String(v == null ? '' : v).replace(',', '.')); }
+
     /* -- 1. wrap every table so a wide one scrolls inside its own card ---- */
     function wrapTables() {
         var tables = Array.prototype.slice.call(document.getElementsByTagName('table'));
@@ -851,7 +857,7 @@
                 dataRows(t).forEach(function (row) {
                     var cell = row.cells[col];
                     if (!cell) { return; }
-                    var pct = parseFloat(text(cell));
+                    var pct = num(text(cell));
                     if (isNaN(pct)) { return; }
                     var sev = severityFor(pct);
                     cell.innerHTML =
@@ -922,7 +928,7 @@
             var fCol = columnIndex(diskTable, 'FreeDisk(GB)');
             var tCol = columnIndex(diskTable, 'TotalDisk(GB)');
             dataRows(diskTable).forEach(function (row) {
-                var pct = parseFloat(row.getAttribute('data-usage') || text(row.cells[uCol]));
+                var pct = num(row.getAttribute('data-usage') || text(row.cells[uCol]));
                 if (isNaN(pct)) { return; }
                 var entry = {
                     pct: pct,
@@ -970,7 +976,7 @@
             var mTot = columnIndex(memTable, 'TotalMemory(GB)');
             var r = dataRows(memTable)[0];
             if (r) {
-                var mv = parseFloat(r.getAttribute('data-usage') || text(r.cells[mCol]));
+                var mv = num(r.getAttribute('data-usage') || text(r.cells[mCol]));
                 if (!isNaN(mv)) {
                     f.memory = { pct: mv,
                                  free: mFree !== -1 ? text(r.cells[mFree]) : null,
@@ -984,7 +990,7 @@
             var cCol = columnIndex(cpuTable, 'LoadPercentage');
             var cr = dataRows(cpuTable)[0];
             if (cr) {
-                var cv = parseFloat(cr.getAttribute('data-usage') || text(cr.cells[cCol]));
+                var cv = num(cr.getAttribute('data-usage') || text(cr.cells[cCol]));
                 if (!isNaN(cv)) {
                     f.cpu = {
                         pct: cv,
@@ -1375,20 +1381,24 @@
             axis.appendChild(tick);
         });
     }
-    /* Dates arrive in the host's locale format: parse defensively and fall back to
-       string order rather than throwing. */
+    /* The day key is the yyyy-MM-dd that HealthCheck.ps1 now emits (an invariant string, so
+       every locale produces the same sortable value). The old code had to guess the field
+       order from the host's locale format and got US dates wrong; parsing a fixed layout is
+       unambiguous. The p[2].length===4 branch is a fallback for a report generated before
+       this change, where the date may still be dd-MM-yyyy. */
     function toDate(s) {
-        var p = s.split(/[-\/]/);
-        if (p.length === 3) {
-            var y = p[2].length === 4 ? p[2] : p[0];
-            var d = p[2].length === 4 ? p[0] : p[2];
-            return new Date(y, (parseInt(p[1], 10) || 1) - 1, parseInt(d, 10) || 1).getTime();
-        }
-        return 0;
+        var p = s.split(/[-\/.]/);
+        if (p.length !== 3) { return 0; }
+        var y, mo, d;
+        if (p[0].length === 4) { y = p[0]; mo = p[1]; d = p[2]; }   /* yyyy-MM-dd (current) */
+        else                   { y = p[2]; mo = p[1]; d = p[0]; }   /* dd-MM-yyyy (legacy)  */
+        return new Date(parseInt(y, 10) || 1970, (parseInt(mo, 10) || 1) - 1, parseInt(d, 10) || 1).getTime();
     }
+    /* Axis tick: month-day, the two fields that vary within a 15-day window. */
     function shortDay(s) {
-        var p = s.split(/[-\/]/);
-        return p.length === 3 ? (p[0] + '/' + p[1]) : s;
+        var p = s.split(/[-\/.]/);
+        if (p.length !== 3) { return s; }
+        return (p[0].length === 4) ? (p[1] + '-' + p[2]) : (p[1] + '-' + p[0]);
     }
 
     /* -- boot ------------------------------------------------------------- */

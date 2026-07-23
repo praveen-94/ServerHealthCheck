@@ -73,7 +73,10 @@ if(-not $IsAdmin -and -not $NoElevate)
   else
   { $hostExe  = (Get-Process -Id $PID).Path
     $relaunch = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $PSCommandPath), '-NoElevate')
-    if($Servers)    { $relaunch += '-Servers';    $relaunch += ($Servers -join ',') }
+    # Quote the joined list, like -InputCsv/-OutputPath below. Unquoted, a value with a space
+    # would split into two arguments across the UAC relaunch; the receiving side re-splits on
+    # commas anyway, so the quotes are safe.
+    if($Servers)    { $relaunch += '-Servers';    $relaunch += ('"{0}"' -f ($Servers -join ',')) }
     if($InputCsv)   { $relaunch += '-InputCsv';   $relaunch += ('"{0}"' -f $InputCsv) }
     if($OutputPath) { $relaunch += '-OutputPath'; $relaunch += ('"{0}"' -f $OutputPath) }
     if($PSBoundParameters.ContainsKey('TimeoutSeconds')) { $relaunch += '-TimeoutSeconds'; $relaunch += $TimeoutSeconds }
@@ -101,9 +104,11 @@ Show-Banner -Version (Get-AppVersion)
 
 #--- Load configuration -------------------------------------------------------
 $ConfigPath = "$PSScriptRoot\config\Path.json"
-if(-not (Test-Path $ConfigPath))
+# -LiteralPath: '[' and ']' are legal in folder names but are wildcards to -Path, so a repo
+# cloned into e.g. C:\Work[1]\ServerHealthCheck reported its own config as missing.
+if(-not (Test-Path -LiteralPath $ConfigPath))
 { Write-Host (Paint "  Configuration file not found at $ConfigPath" 'Red'); exit 1 }
-try   { $Config = Get-Content -Path $ConfigPath -Raw | ConvertFrom-Json }
+try   { $Config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json }
 catch { Write-Host (Paint "  $ConfigPath is not valid JSON: $($_.Exception.Message)" 'Red'); exit 1 }
 
 # Resolve relative config paths to absolute so runspaces don't depend on the cwd.
@@ -224,11 +229,11 @@ else
   { Say "No -Servers parameter supplied; looking for a server list in CSV '$csvToUse'." 'info' `
         -Display "No -Servers given; reading the server list from $(Split-Path -Leaf $csvToUse)"
 
-    if(-not (Test-Path $csvToUse)) { $csvStatus = 'file not found' }
+    if(-not (Test-Path -LiteralPath $csvToUse)) { $csvStatus = 'file not found' }
     else
     { # @() keeps .Count safe: a header-only file yields $null, which Get-Member rejects.
       # A locked/malformed file is a CSV status like any other, not a reason to abort the run.
-      try   { $csvRows = @(Import-Csv -Path $csvToUse) }
+      try   { $csvRows = @(Import-Csv -LiteralPath $csvToUse) }
       catch { $csvRows = @(); $csvStatus = "file could not be read: $($_.Exception.Message)" }
 
       if($csvStatus) { }
@@ -268,8 +273,15 @@ else
 # Split comma-bearing entries ("a,b" on the CLI, and the single token the elevation
 # relaunch forwards), trim, drop blanks, and drop case-insensitive duplicates
 # (HashSet.Add returns false for a seen name) so no host is scanned - or written - twice.
+# The well-known local aliases all resolve to THIS machine, so they collapse to one dedup
+# key: "localhost 127.0.0.1" otherwise scanned the same box twice and wrote two reports.
+# Only these unambiguous aliases are collapsed - two DNS names for one host can't be told
+# apart without resolving them, which isn't worth doing here. The first alias as typed wins.
+$LocalAliases = @('localhost', '.', '127.0.0.1', '::1', $env:COMPUTERNAME)
 $seen = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
-$Servers = $Servers | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Where-Object { $seen.Add($_) }
+$Servers = $Servers |
+    ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ } |
+    Where-Object { $key = if($LocalAliases -contains $_) { '__LOCAL__' } else { $_ }; $seen.Add($key) }
 
 if(-not $Servers -or $Servers.Count -eq 0)
 { Say 'No servers specified.' 'error' -Display 'No servers specified. Nothing to do.'
@@ -363,18 +375,32 @@ foreach($server in $Servers)
     }
   }
   $results.Add($obj)
-  Write-ScanResult -Server $server -Status ([string]$obj.Status) -Elapsed ($watch.Elapsed.TotalSeconds)
+  Write-ScanResult -Server $server -Status ([string]$obj.Status) -Elapsed ($watch.Elapsed.TotalSeconds) -Index $index -Total $total
   # Record the outcome, not just failures: a clean run left a two-line log that said
   # nothing about which hosts were scanned or how they scored.
   Write-Log -Message ("[$index/$total] {0} -> {1} (result {2}) in {3:0.0}s" -f `
                       $server, $obj.Status, $obj.All_Good, $watch.Elapsed.TotalSeconds) `
             -Level 'INFO' -LogPath $LogHCU -NoConsole
 
-  # A timed-out runspace may still be stopping, so Dispose/Close can throw. Never let
-  # cleanup of one host abort the run.
-  try { $psInstance.Dispose() } catch { }
-  try { $runspace.Close()     } catch { }
-  try { $runspace.Dispose()   } catch { }
+  # Cleanup. For a normal host the pipeline is already finished, so disposal is immediate.
+  # For a TIMED-OUT host, BeginStop only *requested* a stop: PowerShell.Dispose() then BLOCKS
+  # until the pipeline actually stops, which a wedged native DCOM call may never do - so a
+  # blind Dispose here could hang the whole tool at cleanup, defeating the deadline. (The
+  # try/catch guards throwing, not blocking, and off-thread disposal isn't possible - a
+  # scriptblock can't run on a threadpool thread.) So give a timed-out instance a short grace
+  # window to unwind; dispose it only if it actually stopped, otherwise abandon it and move
+  # on. An abandoned runspace is reclaimed when the process exits at the end of the run.
+  $disposable = $true
+  if($timedOut)
+  { $graceWatch = [System.Diagnostics.Stopwatch]::StartNew()
+    while(-not $handle.IsCompleted -and $graceWatch.Elapsed.TotalSeconds -lt 3) { Start-Sleep -Milliseconds 100 }
+    $disposable = $handle.IsCompleted
+  }
+  if($disposable)
+  { try { $psInstance.Dispose() } catch { }
+    try { $runspace.Close()     } catch { }
+    try { $runspace.Dispose()   } catch { }
+  }
 }
 
 $runWatch.Stop()
@@ -399,7 +425,12 @@ function ConvertTo-PlainMark([object]$Value)
 }
 
 try
-{ $results |
+{ # ConvertTo-Csv + WriteAllLines, not Export-Csv: "Export-Csv -Encoding UTF8" writes a BOM
+  # on Windows PowerShell 5.1 and NO BOM on PowerShell 7, so the same run produced two
+  # different files depending on which shell launched it. Excel guesses ANSI for a BOM-less
+  # UTF-8 file, which mangles any non-ASCII host name. Same explicit encoding as the HTML
+  # report, so both are written identically on both editions.
+  $csvLines = $results |
       Select-Object -Property @(
           'Server', 'Status'
           @{ Name = 'HardWare_Check';    Expression = { ConvertTo-PlainMark $_.HardWare_Check } }
@@ -411,7 +442,8 @@ try
           @{ Name = 'EventLog_Check';    Expression = { ConvertTo-PlainMark $_.EventLog_Check } }
           'All_Good'
       ) |
-      Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
+      ConvertTo-Csv -NoTypeInformation
+  [System.IO.File]::WriteAllLines($csvPath, [string[]]$csvLines, (New-Object System.Text.UTF8Encoding($true)))
   # File only: the full path wraps over several lines. The Reports section below shows
   # the folder once, with the file names under it.
   Write-Log -Message "Summary exported to $csvPath" -Level 'SUCCESS' -LogPath $LogHCU -NoConsole
