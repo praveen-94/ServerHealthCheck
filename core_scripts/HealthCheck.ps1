@@ -1,4 +1,4 @@
-﻿param([string[]]$Servers, $PathFile, $LogHCU)
+﻿param([string[]]$Servers, $PathFile, $LogHCU, [pscredential]$Credential)
 
 # This file is dual-purpose. Dot-sourcing it (no -Servers, no -PathFile) only DEFINES
 # Get-ServerHealth - which is exactly what the console host's runspace does. Invoking it
@@ -6,13 +6,13 @@
 # the other's behalf: the old unconditional "exit" here killed the runspace before the
 # function was ever defined, so the host had nothing to call and every scan reported Error.
 if($PathFile)
-{ Import-Module "$($PathFile.helperModulePath)\common_utils.psm1"
-  Import-Module "$($PathFile.helperModulePath)\html_formatter.psm1"
+{ Import-Module "$($PathFile.helperModulePath)\common_utils.psm1"   -Force
+  Import-Module "$($PathFile.helperModulePath)\html_formatter.psm1" -Force
 }
 
 # Function to get server health metrics
 function Get-ServerHealth
-{ param($ServerName, $PathFiles, $LogHCU, [PSCredential]$Credential, $Progress)
+{ param($ServerName, $PathFiles, $LogHCU, [pscredential]$Credential, [hashtable]$Progress)
   $SuccessSymbol = [char]::ConvertFromUtf32(0x2714)
   $FailedSymbol = [char]::ConvertFromUtf32(0x2716)
   $WarningSymbol = [char]::ConvertFromUtf32(0x26A0)
@@ -29,7 +29,7 @@ function Get-ServerHealth
   # them. Flowed into the CIM session (and so into every query that reuses it) and into the
   # remote event-log reads. The Windows Update COM object takes no credential, so that one
   # check always runs as the caller.
-  $LocalNames = [System.Collections.Generic.List[string]]@('localhost', '.', '127.0.0.1', '::1', $env:COMPUTERNAME)
+  $LocalNames = [System.Collections.Generic.List[string]]@('localhost', '.', '127.0.0.1', '::1', $env:COMPUTERNAME, [System.Net.Dns]::GetHostName())
   # Own FQDN and NIC IPs count as local too, so scanning yourself by FQDN/IP isn't routed
   # down the (usually blocked) remote WU-over-DCOM path.
   try
@@ -62,25 +62,63 @@ function Get-ServerHealth
 
     if($Pingable -or $null -ne $CimSession)
     { $ReportTitle = "System Health Report"
+      $ScanStarted = Get-Date
 
       # Per-server reports live in their own folder, which is what main.ps1 counts when it
       # prints the Reports section. Falls back to the log folder if the key is absent.
       $ReportFolder = if($PathFiles.ServerReportFolder) { $PathFiles.ServerReportFolder } else { 'ServerReports' }
       $ReportDir    = Join-Path $PathFiles.logPath $ReportFolder
-      if(-not (Test-Path $ReportDir)) { New-Item -ItemType Directory -Path $ReportDir -Force | Out-Null }
-      $OutputFile   = Join-Path $ReportDir "HealthCheckReport_$($ServerName).html"
+      if(-not (Test-Path -LiteralPath $ReportDir)) { New-Item -Path $ReportDir -ItemType Directory -Force | Out-Null }
+      # Sanitise for use as a filename: IPv6 literals (::1), domain\host and the like carry
+      # characters the filesystem rejects. Every illegal one collapses to '_', so 'srv:1' and
+      # 'srv|1' shared a single file and the second silently overwrote the first. Append a
+      # hash of the ORIGINAL name whenever sanitising changed it, leaving normal names alone.
+      $SafeName = ($ServerName -replace '[\\/:*?"<>|]', '_')
+      if($SafeName -ne $ServerName)
+      { $Md5 = [System.Security.Cryptography.MD5]::Create()
+        try   { $Hash = [System.BitConverter]::ToString($Md5.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($ServerName))).Replace('-','').Substring(0,8) }
+        finally { $Md5.Dispose() }
+        $SafeName = "${SafeName}_$Hash"
+      }
+      $OutputFile   = Join-Path $ReportDir "HealthCheckReport_$($SafeName).html"
       $TemplatePath = $PathFiles.HTMLTemplatePath
 
+      # Only Company and Version reach the page. The version comes from the config object
+      # (single source: Get-AppVersion), so the banner and the report cannot disagree.
       $reportInfo = [PSCustomObject]@{
-               Author  = "Praveen"
-               Dates   = $(Get-Date)
-               Computer = $ServerName
                Company = "OnePower"
-               Version = if($PathFiles.ReportVersion) { $PathFiles.ReportVersion } else { "1.0.0" }
+               Version = if($PathFiles.ReportVersion) { [string]$PathFiles.ReportVersion } else { 'unknown' }
       }
 
-      #Load template
-      $html = Get-Content $TemplatePath -Raw
+      # Escape text going into the page OUTSIDE a table cell. ConvertTo-Html escapes cell
+      # values, but -PreContent banners and the identity header are inserted verbatim and
+      # carry host names and exception messages. Hand-rolled so the runspace needs no
+      # System.Web assembly load.
+      $HtmlEscape = { param([string]$Text)
+          ([string]$Text).Replace('&','&amp;').Replace('<','&lt;').Replace('>','&gt;').Replace('"','&quot;')
+      }
+
+      # A failed check and one with genuinely nothing to report both leave the fragment
+      # $null, and an empty section cannot tell them apart. Substitute an explicit note.
+      $Fragment = { param($Value, [string]$EmptyNote)
+          if([string]::IsNullOrWhiteSpace([string]$Value))
+          { return [string](AddPreContentMessage -Type "Information" -Message $EmptyNote) }
+          return [string]$Value
+      }
+
+      # -Encoding UTF8 is required: the template has no BOM and contains non-ASCII, which 5.1
+      # would otherwise decode as ANSI and bake into every report as mojibake. Guarded on its
+      # own because this sits above every check - a missing or locked template used to fall
+      # into the outer catch and report the host as Error with all seven checks failed before
+      # a single one had run. Lose the HTML, not the scan.
+      $html = $null
+      try
+      { if([string]::IsNullOrWhiteSpace([string]$TemplatePath)) { throw "No HTML template path was configured (HTMLTemplatePath)." }
+        $html = Get-Content $TemplatePath -Raw -Encoding UTF8
+      }
+      catch
+      { Write-Log -Message "Failed to load HTML report template '$($TemplatePath)' for $($ServerName); the scan will continue without an HTML report: $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU
+      }
 
       #OS Data.................................................................................................................................................................................
       #Operating System Data
@@ -390,12 +428,14 @@ function Get-ServerHealth
           }
         }},
         @{Name="Result"; Expression={
+        # Plain words, no emoji: every other table in the report is plain text, and the
+        # glyphs were an encoding hazard for anything reading the HTML as ANSI.
         Switch ($_.ResultCode) {
             1 { "In Progress" }
-            2 { "✅ Succeeded" }
-            3 { "⚠️ Requires Restart" }
-            4 { "❌ Failed" }
-            5 { "❌ Aborted" }
+            2 { "Succeeded" }
+            3 { "Succeeded (restart required)" }
+            4 { "Failed" }
+            5 { "Aborted" }
             Default { "Unknown" }
           }
         }} | ConvertTo-Html -Fragment -PreContent (AddPreContentMessage -Type "Information" -Message "Displaying latest 20 Update details only") }
@@ -430,7 +470,7 @@ function Get-ServerHealth
           $EventLogCheck++
         }
         else
-        { $AEvent = (AddPreContentMessage -Type "Warning" -Message "Application event log could not be read. For a remote host, enable the 'Remote Event Log Management' firewall rule on the target.")
+        { $AEvent = (AddPreContentMessage -Type "Warning" -Message "Application event log could not be read: $(& $HtmlEscape $_.Exception.Message) For a remote host, enable the 'Remote Event Log Management' firewall rule on the target.")
           Write-Log -Message "Failed to fetch application event log details: $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU
         }
       }
@@ -448,48 +488,82 @@ function Get-ServerHealth
           $EventLogCheck++
         }
         else
-        { $SEvent = (AddPreContentMessage -Type "Warning" -Message "System event log could not be read. For a remote host, enable the 'Remote Event Log Management' firewall rule on the target.")
+        { $SEvent = (AddPreContentMessage -Type "Warning" -Message "System event log could not be read: $(& $HtmlEscape $_.Exception.Message) For a remote host, enable the 'Remote Event Log Management' firewall rule on the target.")
           Write-Log -Message "Failed to fetch system event log details: $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU
         }
       }
       & $Mark 'EVT' $EventLogCheck 2
+      & $Stage 'report'
 
-      #Replace placeholders, save html file
-      $html = $html -replace "{{REPORT_TITLE}}", $ReportTitle
-      $html = $html -replace "{{CompanyName-ReportTitle}}", "$($reportInfo.Company) - $ReportTitle"
-      $html = $html -replace "{{Computer Name: ThisPC}}", "Computer Name: $ServerName"
-      $html = $html -replace "{{Report Version: ReportVersion}}", "Report Version: $($reportInfo.Version)"
-      $html = $html -replace "<!-- Report Details -->", $reportInfo
-      $html = $html -replace "<!-- Hardware_BIOS -->", $BIOSInfo
-      $html = $html -replace "<!-- Hardware_Battery -->", $BatteryInfo
-      $html = $html -replace "<!-- Hardware_CPU-->", $CPUInfo
-      $html = $html -replace "<!-- Hardware_RAM -->", $MemoryInfo
-      $html = $html -replace "<!-- Hardware_Disk -->", $DiskInfo
-      $html = $html -replace "<!-- Hardware_Printer -->", $PrintersInfo
-      $html = $html -replace "<!-- OS_OS -->", $OSInfo
-      $html = $html -replace "<!-- OS_TimeZone -->", $TimeZoneInfo
-      $html = $html -replace "<!-- OS_ShareFolder -->", $ShareInfo
-      $html = $html -replace "<!-- OS_ScheduleTask -->", $ScheduleTaskInfo
-      $html = $html -replace "<!-- Users_User -->", $LocalUsersInfo
-      $html = $html -replace "<!-- Users_admin -->", $AdminUsersInfo
-      $html = $html -replace "<!-- Users_RDP -->", $RDPUsersInfo
-      $html = $html -replace "<!-- Users_Groups -->", $LocalGroupsInfo
-      $html = $html -replace "<!-- Active_Automatic_Services -->", $AAService
-      $html = $html -replace "<!-- Active_Manual_Services -->", $AMService
-      $html = $html -replace "<!-- Stop_Automatic_Services -->", $SAService
-      $html = $html -replace "<!-- Stop_Manual_Services -->", $SMService
-      $html = $html -replace "<!-- Disable_Services -->", $DService
-      $html = $html -replace "<!-- Application_InstalledApps -->",$AppInfo
-      $html = $html -replace "<!-- Updates_Hotfix -->", $HotFixInfo
-      $html = $html -replace "<!-- Updates_Details -->",  $UpdateHistory
-      $html = $html -replace "<!-- Event_Log_Application -->", $AEvent
-      $html = $html -replace "<!-- Event_Log_System -->", $SEvent
+      #--- Substitute placeholders, write the report ------------------------------
+      # Literal String.Replace, NOT the -replace operator: -replace treats the replacement
+      # as a regex substitution, so a '$' in fragment data - the C$/IPC$/ADMIN$ admin shares,
+      # prices, event-log message text - is mangled as $&, $1 or $`. String.Replace is
+      # ordinal and case-SENSITIVE, so the placeholder strings here must match the template
+      # exactly, including case; a re-cased comment silently drops that section. The [string]
+      # cast keeps it null-safe and preserves the array-join of ConvertTo-Html -Fragment.
+      # Every fragment goes through $Fragment for its empty-section note. The whole block is
+      # skipped when the template failed to load: the checks still ran and the summary is
+      # still valid, there is just no page to render them into.
+      if($null -eq $html)
+      { Write-Log -Message "No HTML report written for $($ServerName): the report template could not be loaded." -Level "WARNING" -LogPath $LogHCU
+      }
+      else
+      {
+      $SafeServer  = & $HtmlEscape $ServerName
+      $GeneratedAt = $ScanStarted.ToString('yyyy-MM-dd HH:mm:ss')
+      $html = $html.Replace("{{REPORT_TITLE}}", "$SafeServer - $ReportTitle")
+      $html = $html.Replace("{{CompanyName-ReportTitle}}", "$($reportInfo.Company) - $ReportTitle")
+      $html = $html.Replace("{{SERVER_NAME}}", $SafeServer)
+      $html = $html.Replace("{{GENERATED_AT}}", "Generated: $GeneratedAt")
+      $html = $html.Replace("{{Computer Name: ThisPC}}", "Computer Name: $SafeServer")
+      $html = $html.Replace("{{Generated: ReportTimestamp}}", "Generated: $GeneratedAt")
+      $html = $html.Replace("{{Scanned By: ReportAuthor}}", "Scanned By: $(& $HtmlEscape "$env:USERDOMAIN\$env:USERNAME")")
+      $html = $html.Replace("{{Report Version: ReportVersion}}", "Report Version: $($reportInfo.Version)")
+      $html = $html.Replace("<!-- Hardware_BIOS -->", (& $Fragment $BIOSInfo 'BIOS details could not be read.'))
+      $html = $html.Replace("<!-- Hardware_Battery -->", (& $Fragment $BatteryInfo 'No battery detected on this host.'))
+      $html = $html.Replace("<!-- Hardware_CPU-->", (& $Fragment $CPUInfo 'CPU details could not be read.'))
+      $html = $html.Replace("<!-- Hardware_RAM -->", (& $Fragment $MemoryInfo 'Memory details could not be read.'))
+      $html = $html.Replace("<!-- Hardware_Disk -->", (& $Fragment $DiskInfo 'No fixed disks found, or disk details could not be read.'))
+      $html = $html.Replace("<!-- Hardware_Printer -->", (& $Fragment $PrintersInfo 'No printers installed, or printer details could not be read.'))
+      $html = $html.Replace("<!-- OS_OS -->", (& $Fragment $OSInfo 'Operating system details could not be read.'))
+      $html = $html.Replace("<!-- OS_TimeZone -->", (& $Fragment $TimeZoneInfo 'Time zone details could not be read.'))
+      $html = $html.Replace("<!-- OS_ShareFolder -->", (& $Fragment $ShareInfo 'No shared folders, or share details could not be read.'))
+      $html = $html.Replace("<!-- OS_ScheduleTask -->", (& $Fragment $ScheduleTaskInfo 'No scheduled tasks, or task details could not be read.'))
+      $html = $html.Replace("<!-- Users_User -->", (& $Fragment $LocalUsersInfo 'No local user accounts, or user details could not be read.'))
+      $html = $html.Replace("<!-- Users_admin -->", (& $Fragment $AdminUsersInfo 'The Administrators group has no members, or its membership could not be read.'))
+      $html = $html.Replace("<!-- Users_RDP -->", (& $Fragment $RDPUsersInfo 'The Remote Desktop Users group has no members, or does not exist on this host.'))
+      $html = $html.Replace("<!-- Users_Groups -->", (& $Fragment $LocalGroupsInfo 'No local groups, or group details could not be read.'))
+      $html = $html.Replace("<!-- Active_Automatic_Services -->", (& $Fragment $AAService 'No running automatic services, or service details could not be read.'))
+      $html = $html.Replace("<!-- Active_Manual_Services -->", (& $Fragment $AMService 'No running manual services, or service details could not be read.'))
+      $html = $html.Replace("<!-- Stop_Automatic_Services -->", (& $Fragment $SAService 'No stopped automatic services - nothing set to start automatically is down.'))
+      $html = $html.Replace("<!-- Stop_Manual_Services -->", (& $Fragment $SMService 'No stopped manual services, or service details could not be read.'))
+      $html = $html.Replace("<!-- Disable_Services -->", (& $Fragment $DService 'No disabled services, or service details could not be read.'))
+      $html = $html.Replace("<!-- Application_InstalledApps -->", (& $Fragment $AppInfo 'No installed applications found, or the registry could not be read.'))
+      $html = $html.Replace("<!-- Updates_Hotfix -->", (& $Fragment $HotFixInfo 'No hotfixes reported, or hotfix details could not be read.'))
+      $html = $html.Replace("<!-- Updates_Details -->", (& $Fragment $UpdateHistory 'Update history is unavailable. On a remote host this usually means DCOM activation of the Windows Update agent is blocked.'))
+      $html = $html.Replace("<!-- Event_Log_Application -->", (& $Fragment $AEvent 'Application event log could not be read.'))
+      $html = $html.Replace("<!-- Event_Log_System -->", (& $Fragment $SEvent 'System event log could not be read.'))
 
-      $html | Out-File $OutputFile | Out-Null
+      # WriteAllText with an explicit UTF8 BOM rather than Out-File: Out-File's default
+      # encoding differs between 5.1 (UTF-16LE) and 7 (UTF-8), so the same report was written
+      # in two different encodings depending on which host ran it. Wrapped in its own
+      # try/catch so a locked file or a full disk logs an error instead of downgrading a
+      # scan that actually succeeded to "Error".
+      try
+      { [System.IO.File]::WriteAllText($OutputFile, $html, (New-Object System.Text.UTF8Encoding($true))) }
+      catch
+      { Write-Log -Message "Failed to write HTML report '$($OutputFile)' for $($ServerName): $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU }
+      }
 
-      # Determine if all metrics are good
+      # Determine if all metrics are good. Test -eq 0 FIRST: with the "Check File" test in
+      # front, 0 satisfies it too, so the "No" branch was unreachable and a host on which
+      # every single check failed still reported "Check File". $MaxScore is summed from the
+      # per-group maxima rather than hardcoded, so adding a check to a group cannot leave a
+      # stale literal behind that silently makes a full pass unreachable instead.
+      $MaxScore = 6 + 4 + 4 + 1 + 1 + 2 + 2
       $AllValueCount = $HardWareCheck + $OSCheck + $UsersCheck + $ServiceCheck + $ApplicationCheck + $UpdateCheck + $EventLogCheck
-      $AllGood = if($AllValueCount -lt 20){"Check File"} elseif($AllValueCount -eq 0){"No"} else{ "Yes" }
+      $AllGood = if($AllValueCount -eq 0){"No"} elseif($AllValueCount -lt $MaxScore){"Check File"} else{"Yes"}
 
       # Return the server health data
       return [PSCustomObject]@{
@@ -544,6 +618,6 @@ function Get-ServerHealth
 
 # Standalone runner: only when invoked with -Servers. Dot-sourcing stops above this line.
 if($Servers -and $Servers.Count -gt 0 -and $PathFile)
-{ $ServerHealthData = $Servers | ForEach-Object { Get-ServerHealth -ServerName $_ -PathFiles $PathFile -LogHCU $LogHCU }
+{ $ServerHealthData = $Servers | ForEach-Object { Get-ServerHealth -ServerName $_ -PathFiles $PathFile -LogHCU $LogHCU -Credential $Credential }
   $ServerHealthData | ConvertTo-Json -Depth 2
 }

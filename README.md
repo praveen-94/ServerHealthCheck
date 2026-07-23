@@ -25,8 +25,18 @@ Metrics are gathered over a single **CIM session per host using DCOM**, which mi
 ## Requirements
 - Windows
 - Windows PowerShell 5.1 **or** PowerShell 7+
+- A terminal that supports ANSI/VT — Windows Terminal is recommended; `-NoColor` falls back for those that don't
 - Administrator rights recommended (the tool will offer to elevate itself)
 - No external modules; nothing to install
+
+If scripts are blocked by execution policy, launch with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\main.ps1 -Servers SERVER01
+# or: pwsh -ExecutionPolicy Bypass -File .\main.ps1 -Servers SERVER01
+```
+
+Files synced through OneDrive can carry a "Mark of the Web" that trips the execution policy even when your policy would otherwise allow them.
 
 ---
 
@@ -65,9 +75,23 @@ With no `-Servers`, the tool falls back to the CSV named in `config/Path.json` (
 .\main.ps1 -Servers SERVER01 -TimeoutSeconds 300
 ```
 
-A full local scan takes roughly 15–20 seconds.
+A full local scan takes roughly 10–20 seconds.
 
 `-PassThru` and `-Credential` cannot cross an elevation boundary, so auto-elevation is skipped for them; run an already-elevated shell if you need both.
+
+### Local vs remote
+
+**Local** (your own machine) gives the most complete report. If not started as Administrator the tool relaunches itself elevated via UAC, opening a new window; `-NoElevate` skips that.
+
+**Remote** needs `-Credential` with an account that is an administrator on the target, and the target must allow:
+
+| Requirement | Used for |
+|---|---|
+| WMI/DCOM through the firewall | every `Win32_*` query, scheduled tasks, printers, installed apps |
+| *Remote Event Log Management* firewall rule | the Application and System event logs |
+| Remote COM activation | Windows Update history — and it always runs as **your** identity, since the WU agent accepts no alternate credentials |
+
+A check that can't get through is logged and bannered in the report rather than failing the scan.
 
 ### Running the check directly
 

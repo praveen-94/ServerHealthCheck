@@ -1,322 +1,576 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <!-- charset first - it must land within the first 1024 bytes. The report carries
+         non-ASCII (user names, event-log text) and PS 7 writes it without a BOM, so
+         a browser opening it over file:// would otherwise guess and show mojibake. -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{REPORT_TITLE}}</title>
     <style>
+        /* =====================================================================
+           Visual system derived from shadcn/ui: zinc neutrals, its token names and
+           its component vocabulary (card, badge, tabs, table, progress, alert,
+           dialog). No webfont - the report opens over file:// with no network, so a
+           font URL would silently fall back. The stack below is Tailwind's font-sans.
+
+           Status colours are validated, not eyeballed: teal / amber / rose clears the
+           lightness band, colour-blind separation, normal-vision floor and contrast in
+           BOTH themes. The obvious emerald / amber / red-600 fails - amber and red-600
+           sit 14.4 ΔE apart to normal vision and are near-identical under deuteranopia,
+           so "warning" and "critical" blur together on a report about what is broken.
+           Colour never carries meaning alone: every status has an icon and a word too.
+           ===================================================================== */
+        :root {
+            --background:         #ffffff;
+            --foreground:         #09090b;
+            --card:               #ffffff;
+            --card-foreground:    #09090b;
+            --muted:              #f4f4f5;
+            --muted-foreground:   #71717a;
+            --border:             #e4e4e7;
+            /* Table rules need a firmer value: --border is nearly --muted, so a header
+               cell's outline vanished against its own background. One step darker
+               (zinc-300) reads clearly without making the grid the loudest thing here. */
+            --table-border:       #d4d4d8;
+            --ring:               #a1a1aa;
+            --primary:            #18181b;
+            --primary-foreground: #fafafa;
+            --secondary:          #f4f4f5;
+            --accent:             #f4f4f5;
+
+            --ok:   #0d9488; --ok-fg:   #0f766e; --ok-bg:   #f0fdfa; --ok-border:   #99f6e4;
+            --warn: #d97706; --warn-fg: #b45309; --warn-bg: #fffbeb; --warn-border: #fde68a;
+            --crit: #e11d48; --crit-fg: #be123c; --crit-bg: #fff1f2; --crit-border: #fecdd3;
+
+            --radius: 0.625rem;
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            --shadow-md: 0 1px 3px 0 rgb(0 0 0 / 0.07), 0 1px 2px -1px rgb(0 0 0 / 0.07);
+            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+
+            --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+                    "Helvetica Neue", Arial, sans-serif;
+            --mono: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", monospace;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --background:         #09090b;
+                --foreground:         #fafafa;
+                --card:               #18181b;
+                --card-foreground:    #fafafa;
+                --muted:              #27272a;
+                --muted-foreground:   #a1a1aa;
+                --border:             #27272a;
+                --table-border:       #3f3f46;
+                --ring:               #52525b;
+                --primary:            #fafafa;
+                --primary-foreground: #18181b;
+                --secondary:          #27272a;
+                --accent:             #27272a;
+
+                --ok:   #0d9488; --ok-fg:   #2dd4bf; --ok-bg:   #0c2b28; --ok-border:   #115e56;
+                --warn: #d97706; --warn-fg: #fbbf24; --warn-bg: #2c1f07; --warn-border: #78430b;
+                --crit: #e11d48; --crit-fg: #fb7185; --crit-bg: #2d0d17; --crit-border: #8b1236;
+
+                --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+                --shadow-md: 0 1px 3px 0 rgb(0 0 0 / 0.5), 0 1px 2px -1px rgb(0 0 0 / 0.5);
+                --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.6), 0 4px 6px -4px rgb(0 0 0 / 0.6);
+            }
+        }
+
+        /* ---- base ------------------------------------------------------- */
+        * { box-sizing: border-box; }
+
         body {
-            font-family: 'Segoe UI', system-ui, sans-serif;
-            background-color: #fff;
-            padding: 30px;
-            color: #4F4C4C;
-            font-size: 0.9em;
+            margin: 0;
+            background: var(--background);
+            color: var(--foreground);
+            font-family: var(--sans);
+            font-size: 14px;
+            line-height: 1.5715;
+            -webkit-font-smoothing: antialiased;
         }
 
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1;
-            padding-top: 100px;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            overflow: auto;
-            background-color: rgba(0,0,0,0.4);
+        /* App shell: a full-height rail pinned left, the report scrolling beside it. The
+           rail carries the host identity, so it stays on screen the whole way down. */
+        .app { display: flex; align-items: stretch; min-height: 100vh; }
+
+        .content {
+            flex: 1 1 auto; min-width: 0;
+            padding: 32px 32px 72px;
+            display: flex; flex-direction: column; gap: 24px;
+        }
+        .content-inner { max-width: 1180px; width: 100%; display: flex; flex-direction: column; gap: 24px; }
+
+        *:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
+            border-radius: calc(var(--radius) - 4px);
         }
 
-        .modal-content {
-            position: relative;
-            background-color: #fff;
-            margin: auto;
-            padding: 0;
-            border: 1px solid #aaa;
-            width: 50%;
-            box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2),0 6px 20px 0 rgba(0,0,0,0.19);
-            -webkit-animation-name: animatetop;
-            -webkit-animation-duration: 0.4s;
-            animation-name: animatetop;
-            animation-duration: 0.4s;
+        .icon {
+            width: 16px; height: 16px; flex: none;
+            stroke: currentColor; fill: none; stroke-width: 2;
+            stroke-linecap: round; stroke-linejoin: round;
+        }
+        .icon-sm { width: 14px; height: 14px; }
+
+        /* ---- badge ------------------------------------------------------ */
+        .badge {
+            display: inline-flex; align-items: center; gap: 5px;
+            border-radius: calc(var(--radius) - 2px);
+            border: 1px solid transparent;
+            padding: 2px 8px;
+            font-size: 12px; font-weight: 600; line-height: 1.45;
+            white-space: nowrap;
+        }
+        .badge-secondary { background: var(--secondary); color: var(--foreground); }
+        .badge-outline   { background: transparent; color: var(--muted-foreground); border-color: var(--border); }
+        .badge-ok   { background: var(--ok-bg);   color: var(--ok-fg);   border-color: var(--ok-border); }
+        .badge-warn { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-border); }
+        .badge-crit { background: var(--crit-bg); color: var(--crit-fg); border-color: var(--crit-border); }
+
+        /* ---- button ----------------------------------------------------- */
+        .btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 6px 12px;
+            background: var(--background); color: var(--foreground);
+            border: 1px solid var(--border); border-radius: calc(var(--radius) - 2px);
+            font: inherit; font-size: 13px; font-weight: 500;
+            cursor: pointer; box-shadow: var(--shadow-sm);
+            transition: background 120ms ease;
+        }
+        .btn:hover { background: var(--accent); }
+
+        /* ---- card ------------------------------------------------------- */
+        .card {
+            background: var(--card); color: var(--card-foreground);
+            border: 1px solid var(--border); border-radius: var(--radius);
+            box-shadow: var(--shadow-sm);
+        }
+        .card-header { display: flex; flex-direction: column; gap: 6px; padding: 20px 20px 0; }
+        .card-header-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .card-title { font-size: 14px; font-weight: 500; letter-spacing: -0.006em; margin: 0; }
+        .card-desc  { font-size: 12px; color: var(--muted-foreground); margin: 0; }
+        .card-content { padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 10px; }
+
+        /* ---- dashboard ---------------------------------------------------
+           Three tiers, so the eye lands in order: verdict, the two "what is going on"
+           panels, then the detail panels. Colour is reserved for what needs attention -
+           healthy figures stay in normal ink, so a tinted number always means something. */
+        .dash-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+            gap: 16px; align-items: start;
         }
 
-        @-webkit-keyframes animatetop {
-            from {top:-300px; opacity:0} 
-            to {top:0; opacity:1}
+        .hero { display: flex; flex-direction: column; gap: 16px; padding: 24px; border-left: 3px solid var(--border); }
+        .hero.is-ok   { border-left-color: var(--ok); }
+        .hero.is-warn { border-left-color: var(--warn); }
+        .hero.is-crit { border-left-color: var(--crit); }
+        .hero-top { display: flex; align-items: flex-start; gap: 14px; }
+        .hero-icon { flex: none; margin-top: 3px; }
+        .hero.is-ok   .hero-icon { color: var(--ok-fg); }
+        .hero.is-warn .hero-icon { color: var(--warn-fg); }
+        .hero.is-crit .hero-icon { color: var(--crit-fg); }
+        .hero-icon .icon { width: 22px; height: 22px; }
+        .hero h2 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.25; }
+        .hero p { margin: 4px 0 0; font-size: 13.5px; color: var(--muted-foreground); line-height: 1.5; }
+
+        /* The seven checks as chips: an index costing one line instead of a row of
+           cards, that still says where the problems are. */
+        .hero-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+        .chip-check {
+            display: inline-flex; align-items: center; gap: 7px;
+            padding: 5px 11px 5px 9px;
+            background: var(--background); color: var(--foreground);
+            border: 1px solid var(--border); border-radius: 9999px;
+            font: inherit; font-size: 12.5px; cursor: pointer;
+            transition: background 120ms ease, border-color 120ms ease;
+        }
+        .chip-check:hover { background: var(--accent); border-color: var(--ring); }
+        .chip-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--border); }
+        .chip-dot.is-warn { background: var(--warn); }
+        .chip-dot.is-crit { background: var(--crit); }
+        .chip-count { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+
+        /* metric rows: name + reading + bar, stacked */
+        .metric + .metric { margin-top: 16px; }
+        .metric-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+        .metric-name { font-size: 13px; }
+        .metric-sub { font-size: 11.5px; color: var(--muted-foreground); }
+        .metric-val { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .metric-val.is-warn { color: var(--warn-fg); }
+        .metric-val.is-crit { color: var(--crit-fg); }
+
+        /* identity facts */
+        .facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px 18px; margin: 0; font-size: 13px; }
+        .facts dt { color: var(--muted-foreground); white-space: nowrap; }
+        .facts dd { margin: 0; overflow-wrap: anywhere; }
+
+        /* ranked action list */
+        .issue { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
+        .issue:first-child { border-top: 0; padding-top: 2px; }
+        .issue:last-child { padding-bottom: 2px; }
+        .issue-icon { flex: none; }
+        .issue-icon.is-warn { color: var(--warn-fg); }
+        .issue-icon.is-crit { color: var(--crit-fg); }
+        .issue-body { flex: 1; min-width: 0; }
+        .issue-title { font-size: 13px; }
+        .issue-note { font-size: 11.5px; color: var(--muted-foreground); line-height: 1.4; }
+        .issue-val { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .issue-val.is-warn { color: var(--warn-fg); }
+        .issue-val.is-crit { color: var(--crit-fg); }
+
+        /* ---- progress --------------------------------------------------- */
+        .progress {
+            position: relative; height: 8px; width: 100%;
+            overflow: hidden; border-radius: 9999px; background: var(--muted);
+        }
+        .progress-bar { height: 100%; border-radius: 9999px; background: var(--primary); }
+        .progress-bar.is-ok   { background: var(--ok); }
+        .progress-bar.is-warn { background: var(--warn); }
+        .progress-bar.is-crit { background: var(--crit); }
+        .progress-tick { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--card); opacity: .9; }
+
+        /* ---- sidebar ---------------------------------------------------- */
+        .sidebar {
+            flex: 0 0 268px; width: 268px;
+            position: sticky; top: 0; align-self: flex-start;
+            height: 100vh; overflow-y: auto;
+            display: flex; flex-direction: column; gap: 20px;
+            padding: 24px 16px;
+            background: var(--card);
+            border-right: 1px solid var(--border);
+        }
+        .sidebar-brand { display: flex; flex-direction: column; gap: 4px; padding: 0 8px; }
+        .sidebar-brand h1 {
+            margin: 0; font-size: 20px; font-weight: 600;
+            letter-spacing: -0.02em; line-height: 1.25;
+            overflow-wrap: anywhere;
+        }
+        .sidebar-brand .generated { font-size: 12px; color: var(--muted-foreground); line-height: 1.4; }
+        .sidebar-nav { display: flex; flex-direction: column; gap: 2px; }
+        .sidebar-foot {
+            margin-top: auto; display: flex; flex-direction: column;
+            align-items: flex-start; gap: 10px;
+            padding: 16px 8px 0; border-top: 1px solid var(--border);
         }
 
-        @keyframes animatetop {
-            from {top:-300px; opacity:0}
-            to {top:0; opacity:1}
+        /* Below this width a fixed rail costs more than it gives: it becomes a normal
+           block at the top, with the nav laid out horizontally. */
+        @media (max-width: 860px) {
+            .app { flex-direction: column; }
+            .sidebar {
+                flex: none; width: auto; height: auto;
+                position: static; overflow: visible;
+                border-right: 0; border-bottom: 1px solid var(--border);
+            }
+            .sidebar-nav { flex-direction: row; flex-wrap: wrap; }
+            .sidebar-nav button { flex: 1 1 auto; }
+            .sidebar-foot { margin-top: 0; flex-direction: row; align-items: center; }
+            .content { padding: 24px 20px 64px; }
         }
-
-        .modal-close {
-            color: #aaa;
-            float: right;
-            padding-top: 4px;
-            font-size: 28px;
-            font-weight: bold;
+        .sidebar-nav button {
+            display: flex; align-items: center; gap: 10px; width: 100%;
+            padding: 8px 10px; border: 0; background: transparent;
+            border-radius: calc(var(--radius) - 4px);
+            font: inherit; font-size: 13px; font-weight: 500; text-align: left;
+            color: var(--muted-foreground); cursor: pointer;
+            transition: background 120ms ease, color 120ms ease;
         }
-
-        .modal-close:hover,
-        .modal-close:focus {
-            color: #aaa;
-            text-decoration: none;
-            cursor: pointer;
+        .sidebar-nav button:hover { background: var(--accent); color: var(--foreground); }
+        .sidebar-nav button.button-clicked {
+            background: var(--accent); color: var(--foreground); font-weight: 600;
         }
+        .nav-icon { color: var(--muted-foreground); }
+        .sidebar-nav button.button-clicked .nav-icon { color: var(--foreground); }
+        /* Status dot on the right of the label, so the nav also answers "where are
+           the problems?" at a glance. */
+        .nav-status { margin-left: auto; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+        .nav-status.is-ok   { background: transparent; }
+        .nav-status.is-warn { background: var(--warn); }
+        .nav-status.is-crit { background: var(--crit); }
+        .sidebar-sep { height: 1px; background: var(--border); margin: 6px 4px; border: 0; }
 
-        .modal-header {
-            padding: 2px 16px;
-            background-color: #ededed;
-            border-bottom: 1px solid #aaa;
-            background-image: linear-gradient(to bottom,#fff 0%,#e0e0e0 100%);
-            text-shadow: 0 1px 0 #fff;
+        /* ---- panels ----------------------------------------------------- */
+        section.tab { display: none; flex-direction: column; gap: 16px; }
+        section.tab.is-active { display: flex; }
+        section.tab > h2 {
+            margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.015em;
         }
+        .panel-desc { margin: -8px 0 0; font-size: 13px; color: var(--muted-foreground); }
+        .is-hidden { display: none !important; }
 
-        .modal-body {
-            padding: 2px 16px;
-        }
-
-        .modal-footer {
-            padding: 2px 16px;
-            background-color: #ededed;
-            border-top: 1px solid #aaa;
-            font-size: 12px;
-            font-weight: normal;
-            text-align: right;
-        }
-
-        .company-logo {
-            position: absolute;
-            background-repeat: no-repeat;
-            width: 127px;
-            height: 50px;
-            top: 28px;
-            right: 37px;
-            border: none;
-            background-image: url('.\Images\logo1.png'); 
-            background-size: contain; /* Adjusts size to fit */
-        }
-
-        .button-clicked {
-            background-image: linear-gradient(to bottom,#e0e0e0 0%,#f7f7f7 100%);
-        }
-
-        button {
-            background-color: #4CAF50;
-            background-image: linear-gradient(to bottom,#fff 0%,#e0e0e0 100%);
-            border: 1px solid #aaa;
-            border-radius: 4px;
-            padding: 5px 10px;
-            text-align: center;
-            text-decoration: none;
-            display: inline-block;
-            margin-right: 5px;
-            cursor: pointer;
-            box-shadow: 0px 0px 2px 1px rgba(221,221,221,0.79);
-            text-shadow: 0 1px 0 #fff;
-        }
-
-        button:focus {
-            outline: #aaa;
-        }
-
-        button:hover {                /* added new */
-            background: #3498db;
-            color: white;
-            
-        }
-
+        /* ---- accordion (details styled as a shadcn card) ---------------- */
         details {
-            margin-top: 5px;
-            margin-bottom: 5px;
-            border: 1px solid #aaa;
-            border-radius: 4px;
-            padding: .5em .5em 0;
-            box-shadow: 0px 0px 6px 1px rgba(221,221,221,0.79);
+            background: var(--card); color: var(--card-foreground);
+            border: 1px solid var(--border); border-radius: var(--radius);
+            box-shadow: var(--shadow-sm);
         }
-
-        details:hover {
-            cursor: pointer;
-            box-shadow: 0px 0px 6px 1px rgba(163, 204, 240.79);
+        details > summary {
+            display: flex; align-items: center; gap: 10px;
+            padding: 16px 20px; cursor: pointer; list-style: none;
+            font-size: 14px; font-weight: 500; letter-spacing: -0.006em;
+            border-radius: var(--radius);
         }
-
-        details:focus {
-            outline: #aaa;
+        details > summary::-webkit-details-marker { display: none; }
+        details > summary:hover { background: var(--accent); }
+        details[open] > summary {
+            border-bottom: 1px solid var(--border);
+            border-radius: var(--radius) var(--radius) 0 0;
         }
+        .chevron { margin-left: auto; color: var(--muted-foreground); transition: transform 180ms ease; }
+        details[open] > summary .chevron { transform: rotate(180deg); }
+        .summary-badges { display: inline-flex; align-items: center; gap: 6px; margin-left: 2px; }
 
-        details[open] {
-             padding: .5em;
-        }
-
-        details[open] summary {
-            border-bottom: 1px solid #aaa;
-            margin-bottom: .5em;
-         }
-
-        summary {
-            margin: -.5em -.5em 0;
-            padding: .5em;
-        }
-
-        summary:focus {
-            outline: #aaa;
-        }
-     
-        .pre-content-alert-information { /* Blue */
-            padding-top: 3px;
-            padding-bottom: 5px;
-            padding-left: 5px;
-            padding-right: 5px;
-            margin-bottom: 10px;
-            border: 1px solid #39739d;
-            /*background: linear-gradient(180deg, rgba(255,255,255,1) 12%, rgba(209,239,255,1) 100%);*/
-            /*background-color: rgb(209,239,255);*/
-            background-color: #e1ecf4;
-        }
-
-        .pre-content-alert-image-information {
-            background-repeat: no-repeat;
-            width: 16px;
-            height: 16px;
-            display: inline-block;
-            margin-right: 6px;
-            vertical-align:middle;
-            background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQBAMAAADt3eJSAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAMFBMVEUAAADC0NxgkLcgZJoATozw8/ZQhbAAUZEAY7IAcMkAeNcwb6EAW6MAddL///////8+qcZNAAAAAXRSTlMAQObYZgAAAAFiS0dEDxi6ANkAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAAHdElNRQflAxQMCDD1nNlJAAAAV0lEQVQI12NgYBAycVZkAIKwilkr21MZGFj33Fq1au3pAAa2U6vWvVq1JoFB/BaIsbaQQWMVGDQxWK4CiayazOAFYSxBMOBSGhBGE0I73EC4FXBLYc4AAJDbQkcK4XJeAAAAJXRFWHRkYXRlOmNyZWF0ZQAyMDIxLTAzLTIwVDEyOjA4OjQ3KzAwOjAww7cw4QAAACV0RVh0ZGF0ZTptb2RpZnkAMjAyMS0wMy0yMFQxMjowODo0NyswMDowMLLqiF0AAAAASUVORK5CYII=');
-        }
-
-        .pre-content-alert-text-information {
-            vertical-align:middle;
-            font-weight: normal;
-            font-size: 14px;
-            color: #39739d;
-        }
-
-        .pre-content-alert-error {
-            padding-top: 3px;
-            padding-bottom: 5px;
-            padding-left: 5px;
-            padding-right: 5px;
-            margin-bottom: 10px;
-            border: 1px solid #721C24;
-            /*background: linear-gradient(180deg, rgba(255,255,255,1) 12%, rgba(209,239,255,1) 100%);*/
-            /*background-color: rgb(209,239,255);*/
-            background-color: #F8D7DA;
-        }
-
-        .pre-content-alert-image-error { /* Red */
-            background-repeat: no-repeat;
-            width: 16px;
-            height: 16px;
-            display: inline-block;
-            margin-right: 6px;
-            vertical-align:middle;
-            background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAMAAAAoLQ9TAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAM1BMVEUAAADjvLfGd2uwQTClJhPBal2qJxPLMBXiNhbwOhe1Tj+8LBTrORfzX0P////5taj///9ex7kGAAAAAXRSTlMAQObYZgAAAAFiS0dEEJWyDSwAAAAJcEhZcwAADsQAAA7EAZUrDhsAAAAHdElNRQflBRsJJyVbtSLSAAAAYUlEQVQY02VPyREAIQhDRBQF6b/b9frskAdDCEcAWEiYiTImeChcm0irXC7vQ+VARz/6ELsFk7F6EqtN39ynKSfAulN/oSLkdkQ/XFoGktt+x4RiIYyEpeFsMBatx+f+738QbAelah2KdAAAACV0RVh0ZGF0ZTpjcmVhdGUAMjAyMS0wNS0yN1QwOTozOTozNiswMDowMAPGksAAAAAldEVYdGRhdGU6bW9kaWZ5ADIwMjEtMDUtMjdUMDk6Mzk6MzYrMDA6MDBymyp8AAAAAElFTkSuQmCC');
-        }
-
-        .pre-content-alert-text-error {
-            vertical-align:middle;
-            font-weight: normal;
-            font-size: 14px;
-            color: #721C24;
-        }
-
-        .pre-content-alert-warning { /* Amber */
-            padding-top: 3px;
-            padding-bottom: 5px;
-            padding-left: 5px;
-            padding-right: 5px;
-            margin-bottom: 10px;
-            border: 1px solid #856404;
-            /*background: linear-gradient(180deg, rgba(255,255,255,1) 12%, rgba(209,239,255,1) 100%);*/
-            /*background-color: rgb(209,239,255);*/
-            background-color: #FFF3CD;
-        }
-
-        .pre-content-alert-image-warning {
-            background-repeat: no-repeat;
-            width: 16px;
-            height: 16px;
-            display: inline-block;
-            margin-right: 6px;
-            vertical-align:middle;
-            background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQBAMAAADt3eJSAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAIVBMVEUAAAD/7sH/+/D+zQD/uQD/wSD84QD83wAAAAD91gD///+RdSDdAAAAAXRSTlMAQObYZgAAAAFiS0dECmjQ9FYAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAAHdElNRQflBRsJIihYc6oqAAAAYUlEQVQI12NgYGBgFGCAAGUjKEPEEUIzBZsqgBmMbiUQRapmyUEQJRntjhAlGW1gRYxuGW1gRapmGW1gRSJpGW3pjiAlaUAAVMToBhRJAypSNQMxgIpMZoKBM0OICxi4AgC5GRmzSdeRMAAAACV0RVh0ZGF0ZTpjcmVhdGUAMjAyMS0wNS0yN1QwOTozNDozOCswMDowMKYHYi0AAAAldEVYdGRhdGU6bW9kaWZ5ADIwMjEtMDUtMjdUMDk6MzQ6MzgrMDA6MDDXWtqRAAAAAElFTkSuQmCC');
-        }
-
-        .pre-content-alert-text-warning {
-            vertical-align:middle;
-            font-weight: normal;
-            font-size: 14px;
-            color: #856404;
-        }
-
+        /* ---- tables -----------------------------------------------------
+           ConvertTo-Html -Fragment emits <table><colgroup>..</colgroup><tr><th> with NO
+           thead/tbody, so the header row is addressed as tr:first-child.        */
+        .table-wrap { overflow-x: auto; border-radius: 0 0 var(--radius) var(--radius); }
+        /* One font for every cell: switching individual cells to mono by how the value
+           looked rendered one column in two faces ("2.17.25.506" mono beside "LENOVO - 3"
+           sans) and left rows ragged. Tabular figures keep the digits lined up. */
         table {
-            border: 0px;
-            border-collapse: collapse;
+            width: 100%; border-collapse: collapse;
+            font-size: 13px; background: var(--card);
+            font-variant-numeric: tabular-nums;
         }
-    
-        th { 
-            padding: 5px;
-            border: 1px solid #aaa;
-            /*text-shadow: 0 1px 0 #fff;*/
-            /*background-image: linear-gradient(to bottom,#fff 0%,#e0e0e0 100%);*/
-            background-color: #e0e0e0;
+        /* Every cell carries a full box, so rows and columns are bounded on all four
+           sides. Content sits left and vertically centred; tabular figures line the
+           digits up without needing right alignment. */
+        table th {
+            height: 40px; padding: 8px 14px;
+            text-align: left; vertical-align: middle; white-space: nowrap;
+            font-weight: 600; font-size: 12px; color: var(--foreground);
+            background: var(--muted);
+            border: 1px solid var(--table-border);
+        }
+        table td {
+            padding: 11px 14px;
+            text-align: left; vertical-align: middle;
+            border: 1px solid var(--table-border);
+        }
+        table tr:hover td { background: var(--muted); }
+
+        /* Long free text is the one cell type with its own treatment: muted, and
+           clamped so an event message can't stretch the table. */
+        table td.msg { color: var(--muted-foreground); max-width: 62ch; }
+
+        /* usage cell: the number keeps a bar beside it for scale */
+        .usage-cell { display: flex; align-items: center; gap: 12px; min-width: 172px; }
+        .usage-cell .progress { flex: 1; height: 6px; }
+        .usage-num {
+            font-variant-numeric: tabular-nums;
+            font-weight: 600; min-width: 6ch;
+        }
+        .usage-num.is-ok   { color: var(--ok-fg); }
+        .usage-num.is-warn { color: var(--warn-fg); }
+        .usage-num.is-crit { color: var(--crit-fg); }
+
+        /* Cell highlight classes, kept for the colouring pass. */
+        .table-cell-green { color: var(--ok-fg);   font-weight: 600; }
+        .table-cell-amber { color: var(--warn-fg); font-weight: 600; }
+        .table-cell-red   { color: var(--crit-fg); font-weight: 600; }
+
+        /* ---- alerts -----------------------------------------------------
+           Class names come from html_formatter.psm1 (AddPreContentMessage); only the
+           styling is ours. Rendered as a shadcn Alert.                        */
+        .pre-content-alert-information,
+        .pre-content-alert-warning,
+        .pre-content-alert-error {
+            display: flex; gap: 12px; align-items: flex-start;
+            margin: 16px 20px; padding: 14px 16px;
+            border: 1px solid var(--border); border-radius: var(--radius);
+            background: var(--card); font-size: 13px;
+        }
+        .pre-content-alert-warning { border-color: var(--warn-border); background: var(--warn-bg); }
+        .pre-content-alert-error   { border-color: var(--crit-border); background: var(--crit-bg); }
+
+        .pre-content-alert-image-information,
+        .pre-content-alert-image-warning,
+        .pre-content-alert-image-error {
+            width: 16px; height: 16px; flex: none; margin-top: 1px;
+            background-repeat: no-repeat; background-size: contain;
+        }
+        /* lucide info / triangle-alert / circle-x as data URIs, so the report stays
+           a single portable file. */
+        .pre-content-alert-image-information {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 16v-4'/%3E%3Cpath d='M12 8h.01'/%3E%3C/svg%3E");
+        }
+        .pre-content-alert-image-warning {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23b45309' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z'/%3E%3Cpath d='M12 9v4'/%3E%3Cpath d='M12 17h.01'/%3E%3C/svg%3E");
+        }
+        .pre-content-alert-image-error {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23be123c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='m15 9-6 6'/%3E%3Cpath d='m9 9 6 6'/%3E%3C/svg%3E");
+        }
+        .pre-content-alert-text-information { color: var(--muted-foreground); }
+        .pre-content-alert-text-warning     { color: var(--warn-fg); }
+        .pre-content-alert-text-error       { color: var(--crit-fg); }
+
+        /* An alert that is the whole section body needs no outer margin fight */
+        details > .pre-content-alert-information,
+        details > .pre-content-alert-warning,
+        details > .pre-content-alert-error { margin: 16px 20px; }
+
+        /* ---- chart ------------------------------------------------------ */
+        .chart { display: flex; flex-direction: column; gap: 10px; }
+        .bars { display: flex; align-items: flex-end; gap: 4px; height: 104px; }
+        .bar-col { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; position: relative; }
+        .bar { width: 100%; background: var(--primary); border-radius: 4px 4px 0 0; min-height: 2px; transition: opacity 120ms ease; }
+        .bar-col[data-count="0"] .bar { background: var(--border); }
+        .bar-col:hover .bar { opacity: .75; }
+        .bar-peak {
+            position: absolute; bottom: 100%; left: 50%; transform: translate(-50%, -4px);
+            font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums;
+        }
+        .bar-axis { display: flex; gap: 4px; }
+        .bar-axis span { flex: 1; text-align: center; font-size: 11px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+        .bar-col::after {
+            content: attr(data-count) " on " attr(data-day);
+            position: absolute; bottom: 100%; left: 50%; transform: translate(-50%, -20px);
+            background: var(--primary); color: var(--primary-foreground);
+            padding: 4px 8px; border-radius: calc(var(--radius) - 4px);
+            font-size: 11.5px; white-space: nowrap; opacity: 0; pointer-events: none;
+            transition: opacity 120ms ease; box-shadow: var(--shadow-md); z-index: 2;
+        }
+        .bar-col:hover::after { opacity: 1; }
+
+        /* ---- dialog (Report information) -------------------------------- */
+        .modal {
+            display: none; position: fixed; inset: 0; z-index: 50;
+            background: rgb(0 0 0 / 0.6);
+            padding: 24px; overflow: auto;
+        }
+        .modal.is-open { display: block; }
+        .modal-content {
+            background: var(--card); color: var(--card-foreground);
+            border: 1px solid var(--border); border-radius: var(--radius);
+            box-shadow: var(--shadow-lg);
+            max-width: 480px; margin: 10vh auto 0;
+            animation: dialog-in 160ms cubic-bezier(.2,.7,.3,1);
+        }
+        @keyframes dialog-in { from { opacity: 0; transform: translateY(-8px) scale(.98); } to { opacity: 1; transform: none; } }
+        .modal-header {
+            display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+            padding: 20px 20px 0;
+        }
+        .modal-header h2 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+        .modal-close {
+            background: none; border: 0; cursor: pointer; padding: 2px;
+            color: var(--muted-foreground); font-size: 20px; line-height: 1;
+        }
+        .modal-close:hover { color: var(--foreground); }
+        .modal-body { padding: 12px 20px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted-foreground); }
+        .modal-body p { margin: 0; }
+        .modal-footer {
+            padding: 12px 20px; border-top: 1px solid var(--border);
+            font-size: 12px; color: var(--muted-foreground); text-align: right;
+        }
+        .modal-footer p { margin: 0; }
+
+        .separator { height: 1px; background: var(--border); border: 0; margin: 0; }
+        footer.report-footer {
+            display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between;
+            color: var(--muted-foreground); font-size: 12px;
         }
 
-        tr:nth-child(odd) {
-            background-color:#ededed;
-        } 
-    
-        tr:nth-child(even) {
-            background-color: #FFFFFF;
-        }
-       
-        td {
-            border: 1px solid #aaa;
-            padding: 5px;
+        @media (prefers-reduced-motion: reduce) {
+            * { transition: none !important; animation: none !important; }
         }
 
-        .table-cell-green {
-            background-color: #D4EDDA; color: #15572a;
+        /* ---- print: auditors PDF these ---------------------------------- */
+        @media print {
+            .sidebar, .bar-col::after, .modal { display: none !important; }
+            section.tab { display: flex !important; break-inside: avoid; }
+            details { break-inside: avoid; box-shadow: none; }
+            details > div, details > table, details > .table-wrap { display: block !important; }
+            body { font-size: 10pt; }
         }
-
-        .table-cell-amber {
-            background-color: #FFF3CD; color: #856404;
-        }
-
-        .table-cell-red {
-            background-color: #F8D7DA; color: #721C24;
-        }
-
     </style>
 </head>
 
 <body>
-    <aside id='modal' class='modal'>
+<!-- Outside the shell: position:fixed, and it must not be clipped by the sidebar's
+     own scroll container. -->
+<aside id='modal' class='modal'>
         <div class='modal-content'>
             <div class='modal-header'>
-                <span class='modal-close'>&times;</span>
                 <h2>{{CompanyName-ReportTitle}}</h2>
+                <button type='button' class='modal-close' id='btn-modal-close' aria-label='Close'>&times;</button>
             </div>
             <div class='modal-body'>
                 <p>{{Computer Name: ThisPC}}</p>
+                <p>{{Generated: ReportTimestamp}}</p>
+                <p>{{Scanned By: ReportAuthor}}</p>
             </div>
             <div class='modal-footer'>
                 <p>{{Report Version: ReportVersion}}</p>
             </div>
         </div>
+</aside>
+
+<div class="app">
+
+    <aside class='sidebar'>
+        <div class='sidebar-brand'>
+            <h1>{{SERVER_NAME}}</h1>
+            <span class='generated'>{{GENERATED_AT}}</span>
+        </div>
+
+        <!-- Labels live in the markup, not the script, so the nav still reads correctly
+             if the summary pass fails. The script only adds the icon and status dot. -->
+        <nav class='sidebar-nav' id='sidebar-nav' aria-label='Report sections'>
+            <button type='button' class='button-clicked' data-tab='tab-dashboard' data-icon='dash'><span class='nav-label'>Dashboard</span></button>
+            <hr class='sidebar-sep'>
+            <button type='button' data-tab='tab-hardware' data-icon='disk'><span class='nav-label'>Hardware</span></button>
+            <button type='button' data-tab='tab-os' data-icon='os'><span class='nav-label'>OS</span></button>
+            <button type='button' data-tab='tab-user' data-icon='users'><span class='nav-label'>Users</span></button>
+            <button type='button' data-tab='tab-services' data-icon='svc'><span class='nav-label'>Services</span></button>
+            <button type='button' data-tab='tab-applications' data-icon='apps'><span class='nav-label'>Applications</span></button>
+            <button type='button' data-tab='tab-updates' data-icon='upd'><span class='nav-label'>Updates</span></button>
+            <button type='button' data-tab='tab-eventlogs' data-icon='evt'><span class='nav-label'>Event Logs</span></button>
+        </nav>
+
+        <div class='sidebar-foot'>
+            <span id='verdict-badge' class='badge badge-secondary'>Reading results&hellip;</span>
+            <button type='button' class='btn' id='btn-report-info'>
+                <svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                Report information
+            </button>
+        </div>
     </aside>
 
-    <aside id='company-logo'></aside>
+    <main class='content'>
+    <div class='content-inner'>
 
-    <nav>
-        <button class='button-clicked' onclick="opentab('tab-hardware');navBtnClick(this);">💻 Hardware</button>
-        <button onclick="opentab('tab-os');navBtnClick(this);">🪟 OS</button>
-        <button onclick="opentab('tab-user');navBtnClick(this);">🧑‍💻 Users</button>
-        <button onclick="opentab('tab-services');navBtnClick(this);">🛠️ Services</button>
-        <button onclick="opentab('tab-applications');navBtnClick(this);">📦 Applications</button>
-        <button onclick="opentab('tab-updates');navBtnClick(this);">🔄 Updates</button>
-        <button onclick="opentab('tab-eventlogs');navBtnClick(this);">📜 Event Logs</button>
-        <button onclick=openModal()>Report Information</button>
-    </nav> 
+    <!-- Every panel below is filled from the tables further down the page; none of it
+         needs data HealthCheck.ps1 doesn't already render. -->
+    <section id='tab-dashboard' class='tab is-active'>
+        <div class='card hero' id='dash-hero'></div>
+
+        <div class='dash-grid'>
+            <div class='card' id='dash-resources'></div>
+            <div class='card' id='dash-system'></div>
+        </div>
+
+        <div class='dash-grid'>
+            <div class='card' id='dash-attention'></div>
+            <div class='card is-hidden' id='event-chart-card'>
+                <div class='card-header'>
+                    <h2 class='card-title'>Errors per day</h2>
+                    <p class='card-desc'>Error and critical events in the sampled window</p>
+                </div>
+                <div class='card-content'>
+                    <div class='chart'>
+                        <div class='bars' id='bars'></div>
+                        <div class='bar-axis' id='axis'></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
 
     <section id='tab-hardware' class='tab'>
         <h2>Hardware Details</h2>
@@ -346,7 +600,7 @@
         </details>
     </section>
 
-    <section id='tab-os' class='tab' style='display:none'>
+    <section id='tab-os' class='tab'>
         <h2>OS Details</h2>
         <details>
             <summary>OS</summary>
@@ -366,7 +620,7 @@
         </details>
     </section>
 
-    <section id='tab-user' class='tab' style='display:none'>
+    <section id='tab-user' class='tab'>
         <h2>Users Details</h2>
         <details>
             <summary>Local Users</summary>
@@ -386,7 +640,7 @@
         </details>
     </section>
 
-    <section id='tab-services' class='tab' style='display:none'>
+    <section id='tab-services' class='tab'>
         <h2>Services Details</h2>
         <details>
             <summary>Active and Automatic Services</summary>
@@ -410,7 +664,7 @@
         </details>
     </section>
 
-    <section id='tab-applications' class='tab' style='display:none'>
+    <section id='tab-applications' class='tab'>
         <h2>Applications Details</h2>
         <details>
             <summary>Installed Applications</summary>
@@ -418,7 +672,7 @@
         </details>
     </section>
 
-    <section id='tab-updates' class='tab' style='display:none'>
+    <section id='tab-updates' class='tab'>
         <h2>Updates Details</h2>
         <details>
             <summary>Hot Fix</summary>
@@ -430,7 +684,7 @@
         </details>
     </section>
 
-    <section id='tab-eventlogs' class='tab' style='display:none'>
+    <section id='tab-eventlogs' class='tab'>
         <h2>Event Logs Details</h2>
         <details>
             <summary>Event Log: Application</summary>
@@ -442,146 +696,760 @@
         </details>
     </section>
 
-    <script>
-        //HTML Cleanup : Remove Collections and Colection Groups <col> <colgroup> from DOM
-        var col = document.getElementsByTagName('col'), index;
-        for(index = col.length - 1; index >= 0; index--) 
-        { col[index].parentNode.removeChild(col[index]);
-        }
-        var colgroup = document.getElementsByTagName('colgroup'), index;
-        for(index = colgroup.length - 1; index >= 0; index--) 
-        { colgroup[index].parentNode.removeChild(colgroup[index]);
-        }
+    <hr class='separator'>
+    <footer class='report-footer'>
+        <span>ServerVitals health report</span>
+        <span>{{Computer Name: ThisPC}}</span>
+    </footer>
 
-        //Tab Button Function System : Displays and Hides Tab Sections on Nav Button Click
-        function opentab(tabName) 
-        { var i;
-          var x = document.getElementsByClassName('tab');
-          for(i = 0; i < x.length; i++) 
-          { x[i].style.display = 'none';  
-          }
-          document.getElementById(tabName).style.display = 'block'; 
-        }
+    </div>
+    </main>
+</div>
 
-        //Nav Button Click Function : Toggles Pressed / De-Pressed Visual State of button by adding or removing css class
-        function navBtnClick(elem) 
-        { var btn = document.getElementsByTagName('button');
-          for(i = 0; i < btn.length; i++) 
-          { btn[i].classList.remove('button-clicked')
-          }
-          elem.classList.add('button-clicked');
-        }
+<script>
+/* =========================================================================
+   All of this reads the tables PowerShell already rendered - nothing here needs
+   new data from HealthCheck.ps1.
+   ========================================================================= */
+(function () {
+    'use strict';
 
-        //Modal (Report Information Button) : Display Modal on Button Click
-        var modal = document.getElementById('modal');
-        function openModal()
-        { modal.style.display = 'block';
-        }
-        var modalClose = document.getElementsByClassName('modal-close')[0];
-        modalClose.onclick = function() 
-        { modal.style.display = 'none';
-        }
-        window.onclick = function(event) 
-        { if(event.target == modal) 
-          { modal.style.display = 'none';
-          }
-        }
-        modal.style.display = 'block';
+    var SVG = 'http://www.w3.org/2000/svg';
 
-        // Custom Scripts: --> CPU Usage Table Update : Set cell colour based on % Usage
-        var rows = document.getElementsByTagName('table')[2].rows; // 6th Table from top, Index [4]
-        var columnName = rows[0].cells[5]
-        if( columnName.innerHTML === 'LoadPercentage')
-        { var cell = rows[rows.length -1].cells[5]
-          var usage  = cell.innerHTML; // 5th cell from left, Index [4]
-                if (usage < 70)                 { cell.classList.add('table-cell-green');};
-                if (usage >= 70 && usage < 90)  { cell.classList.add('table-cell-amber');};
-                if (usage >= 90)                { cell.classList.add('table-cell-red')  ;};
-        }
-        else 
-        { alert ('The Disk Table has changed position and will not be colour coded. Please contact the author of this report to resolve the problem.' + columnName + " | " + usage );
-        }
+    var ICONS = {
+        ok:    ['<circle cx="12" cy="12" r="10"/>', '<path d="m9 12 2 2 4-4"/>'],
+        warn:  ['<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>', '<path d="M12 9v4"/>', '<path d="M12 17h.01"/>'],
+        crit:  ['<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>', '<path d="M12 9v4"/>', '<path d="M12 17h.01"/>'],
+        disk:  ['<line x1="22" x2="2" y1="12" y2="12"/>', '<path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>', '<line x1="6" x2="6.01" y1="16" y2="16"/>', '<line x1="10" x2="10.01" y1="16" y2="16"/>'],
+        ram:   ['<path d="M6 19v-3"/>', '<path d="M10 19v-3"/>', '<path d="M14 19v-3"/>', '<path d="M18 19v-3"/>', '<path d="M8 11V9"/>', '<path d="M16 11V9"/>', '<path d="M12 11V9"/>', '<path d="M2 15h20"/>', '<path d="M2 7a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v1.1a2 2 0 0 0 0 3.837V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5.062a2 2 0 0 0 0-3.874Z"/>'],
+        cpu:   ['<rect width="16" height="16" x="4" y="4" rx="2"/>', '<rect width="6" height="6" x="9" y="9" rx="1"/>', '<path d="M15 2v2"/>', '<path d="M15 20v2"/>', '<path d="M2 15h2"/>', '<path d="M2 9h2"/>', '<path d="M20 15h2"/>', '<path d="M20 9h2"/>', '<path d="M9 2v2"/>', '<path d="M9 20v2"/>'],
+        svc:   ['<rect width="20" height="8" x="2" y="2" rx="2"/>', '<rect width="20" height="8" x="2" y="14" rx="2"/>', '<line x1="6" x2="6.01" y1="6" y2="6"/>', '<line x1="6" x2="6.01" y1="18" y2="18"/>'],
+        evt:   ['<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>'],
+        os:    ['<rect width="18" height="18" x="3" y="3" rx="2"/>', '<path d="M3 9h18"/>', '<path d="M9 21V9"/>'],
+        users: ['<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>', '<circle cx="9" cy="7" r="4"/>', '<path d="M22 21v-2a4 4 0 0 0-3-3.87"/>'],
+        apps:  ['<path d="m7.5 4.27 9 5.15"/>', '<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/>', '<path d="m3.3 7 8.7 5 8.7-5"/>', '<path d="M12 22V12"/>'],
+        upd:   ['<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>', '<path d="M21 3v5h-5"/>', '<path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>', '<path d="M8 16H3v5"/>'],
+        dash:  ['<rect width="7" height="9" x="3" y="3" rx="1"/>', '<rect width="7" height="5" x="14" y="3" rx="1"/>', '<rect width="7" height="9" x="14" y="12" rx="1"/>', '<rect width="7" height="5" x="3" y="16" rx="1"/>']
+    };
 
-        // Custom Scripts: --> Disk Space Table Update : Set cell colour based on % Free Space
-        var rows = document.getElementsByTagName('table')[3].rows; // 6th Table from top, Index [4]
-        var columnName = rows[0].cells[3]
-        if( columnName.innerHTML === 'MemoryUsage(%)')
-        { var cell = rows[rows.length -1].cells[3]
-          var usage  = cell.innerHTML; // 5th cell from left, Index [4]
-                if (usage < 70)                 { cell.classList.add('table-cell-green');};
-                if (usage >= 70 && usage < 90)  { cell.classList.add('table-cell-amber');};
-                if (usage >= 90)                { cell.classList.add('table-cell-red')  ;};
-        }
-        else 
-        { alert ('The Disk Table has changed position and will not be colour coded. Please contact the author of this report to resolve the problem.' + columnName + " | " + usage );
-        }
+    function icon(name, cls) {
+        var paths = ICONS[name] || [];
+        return '<svg class="icon icon-sm ' + (cls || '') + '" viewBox="0 0 24 24" fill="none" ' +
+               'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' +
+               'aria-hidden="true">' + paths.join('') + '</svg>';
+    }
 
-        // Custom Scripts: --> Memory Space Table Update : Set cell colour based on % Free Space
-        var rows = document.getElementsByTagName('table')[4].rows; // 6th Table from top, Index [4]
-        var columnName = rows[0].cells[4]
-        if( columnName.innerHTML === 'DiskUsage(%)')
-        { for(let i = 1; i < rows.length; i++) 
-          { var cell = rows[i].cells[4]
-            var usage  = cell.innerHTML; // 5th cell from left, Index [4]
-                if (usage < 70)                 { cell.classList.add('table-cell-green');};
-                if (usage >= 70 && usage < 90)  { cell.classList.add('table-cell-amber');};
-                if (usage >= 90)                { cell.classList.add('table-cell-red')  ;};
-          }
-        }
-        else 
-        { alert ('The Disk Table has changed position and will not be colour coded. Please contact the author of this report to resolve the problem.' + columnName + " | " + usage );
-        }
+    function text(el) { return (el && el.textContent ? el.textContent : '').trim(); }
 
-        //Custom Scripts: --> event log Table Update : Set cell colour based on error critical warning
-        document.addEventListener('DOMContentLoaded', function() 
-        { var eventLogSection = document.getElementById('tab-eventlogs');
-          var table = eventLogSection.getElementsByTagName('table')[0];
-          if(table) 
-          { var rows = table.rows;
-            var columnName = rows[0].cells[2];
-            if(columnName.innerHTML === 'LevelDisplayName') 
-            { for(let i = 1; i < rows.length; i++) 
-              { var cell = rows[i].cells[2];
-                var value = cell.innerHTML;
-                if(value === 'Critical') { cell.classList.add('table-cell-red'); }
-                if(value === 'Error') { cell.classList.add('table-cell-red'); }
-                if(value === 'Warning') { cell.classList.add('table-cell-amber'); }
-              }
+    /* Escape anything read back out of the page before concatenating it into an
+       innerHTML string. ConvertTo-Html escapes cell values on the way IN, but text()
+       reads textContent and hands back the DECODED text, so building markup from it
+       re-parsed that text as HTML. Values a scanned host controls (VolumeName, CPU
+       Name, BIOS SerialNumber, OS Caption / RegisteredUser) came back as live markup:
+       a volume labelled <img src=x onerror=...> executed when an admin opened the
+       report. Everything reaching an innerHTML string goes through esc() first. */
+    function esc(s) {
+        return String(s === null || s === undefined ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    /* -- table helpers ---------------------------------------------------
+       ConvertTo-Html -Fragment gives <table><colgroup/><tr><th>..</tr><tr><td>.., so
+       row 0 is the header and there is no thead/tbody to lean on.           */
+    function headerCells(table) {
+        var first = table.rows[0];
+        return first ? Array.prototype.slice.call(first.cells) : [];
+    }
+    function columnIndex(table, name) {
+        var cells = headerCells(table), i;
+        for (i = 0; i < cells.length; i++) {
+            if (text(cells[i]) === name) { return i; }
+        }
+        return -1;
+    }
+    function dataRows(table) {
+        return Array.prototype.slice.call(table.rows).slice(1);
+    }
+    /* First table in the page carrying a given header. */
+    function tableWithHeader(name) {
+        var tables = document.getElementsByTagName('table'), i;
+        for (i = 0; i < tables.length; i++) {
+            if (columnIndex(tables[i], name) !== -1) { return tables[i]; }
+        }
+        return null;
+    }
+    /* Table inside the <details> whose summary reads exactly this. */
+    function tableInSection(summaryText) {
+        var all = document.getElementsByTagName('details'), i, s;
+        for (i = 0; i < all.length; i++) {
+            s = all[i].querySelector('summary');
+            if (s && text(s).indexOf(summaryText) === 0) {
+                return all[i].querySelector('table');
             }
-            else 
-            { alert('The Disk Table has changed position and will not be colour coded. Please contact the author of this report to resolve the problem.' + columnName.innerHTML);
+        }
+        return null;
+    }
+    function sectionFor(summaryText) {
+        var all = document.getElementsByTagName('details'), i, s;
+        for (i = 0; i < all.length; i++) {
+            s = all[i].querySelector('summary');
+            if (s && text(s).indexOf(summaryText) === 0) { return all[i]; }
+        }
+        return null;
+    }
+
+    function severityFor(pct) {
+        if (pct >= 90) { return 'crit'; }
+        if (pct >= 70) { return 'warn'; }
+        return 'ok';
+    }
+
+    /* -- 1. wrap every table so a wide one scrolls inside its own card ---- */
+    function wrapTables() {
+        var tables = Array.prototype.slice.call(document.getElementsByTagName('table'));
+        tables.forEach(function (t) {
+            if (t.parentNode && t.parentNode.className === 'table-wrap') { return; }
+            var wrap = document.createElement('div');
+            wrap.className = 'table-wrap';
+            t.parentNode.insertBefore(wrap, t);
+            wrap.appendChild(t);
+        });
+    }
+
+    /* -- 2. type the cells --------------------------------------------------
+       Only long free text is singled out, decided ONCE PER COLUMN from the header,
+       never per cell from the value - that is what put two faces in one column. */
+    var MSG_HEADERS = ['Message', 'Description', 'Title'];
+
+    function typeCells() {
+        var tables = Array.prototype.slice.call(document.getElementsByTagName('table'));
+        tables.forEach(function (t) {
+            var heads = headerCells(t).map(text);
+            var msgCols = [];
+            heads.forEach(function (h, i) { if (MSG_HEADERS.indexOf(h) !== -1) { msgCols.push(i); } });
+            if (!msgCols.length) { return; }
+            dataRows(t).forEach(function (row) {
+                msgCols.forEach(function (i) {
+                    if (row.cells[i]) { row.cells[i].className = 'msg'; }
+                });
+            });
+        });
+    }
+
+    /* -- 3. colour + meter the metric columns ----------------------------
+       Matched by HEADER NAME, never position: a table that gains a column, or a
+       check that renders a banner instead of a table, must not break this.  */
+    var PERCENT_COLUMNS = ['LoadPercentage', 'MemoryUsage(%)', 'DiskUsage(%)'];
+
+    function decorateMetrics() {
+        var tables = Array.prototype.slice.call(document.getElementsByTagName('table'));
+        tables.forEach(function (t) {
+            var heads = headerCells(t).map(text);
+            heads.forEach(function (h, col) {
+                if (PERCENT_COLUMNS.indexOf(h) === -1) { return; }
+                dataRows(t).forEach(function (row) {
+                    var cell = row.cells[col];
+                    if (!cell) { return; }
+                    var pct = parseFloat(text(cell));
+                    if (isNaN(pct)) { return; }
+                    var sev = severityFor(pct);
+                    cell.innerHTML =
+                        '<div class="usage-cell">' +
+                          '<div class="progress" role="img" aria-label="' + pct + ' percent">' +
+                            '<div class="progress-bar is-' + sev + '" style="width:' + Math.min(pct, 100) + '%"></div>' +
+                            '<span class="progress-tick" style="left:70%"></span>' +
+                            '<span class="progress-tick" style="left:90%"></span>' +
+                          '</div>' +
+                          '<span class="usage-num is-' + sev + '">' + pct.toFixed(1) + '%</span>' +
+                        '</div>';
+                });
+            });
+
+            /* Event severity and service state read better as badges. */
+            var lvl = heads.indexOf('LevelDisplayName');
+            if (lvl !== -1) {
+                dataRows(t).forEach(function (row) {
+                    var cell = row.cells[lvl];
+                    if (!cell) { return; }
+                    var v = text(cell);
+                    var cls = (v === 'Critical' || v === 'Error') ? 'crit' : (v === 'Warning' ? 'warn' : 'secondary');
+                    cell.innerHTML = '<span class="badge badge-' + cls + '">' + esc(v) + '</span>';
+                });
             }
-          }
-          else 
-          { console.error('No table found in the tab-eventlogs section.');
-          }
+            var state = heads.indexOf('State');
+            if (state !== -1) {
+                dataRows(t).forEach(function (row) {
+                    var cell = row.cells[state];
+                    if (!cell) { return; }
+                    var v = text(cell);
+                    var cls = v === 'Running' ? 'ok' : (v === 'Stopped' ? 'warn' : 'secondary');
+                    cell.innerHTML = '<span class="badge badge-' + cls + '">' + esc(v) + '</span>';
+                });
+            }
+            var result = heads.indexOf('Result');
+            if (result !== -1) {
+                dataRows(t).forEach(function (row) {
+                    var cell = row.cells[result];
+                    if (!cell) { return; }
+                    var v = text(cell);
+                    var cls = /Succeeded/.test(v) ? 'ok' : (/Failed|Aborted/.test(v) ? 'crit' : 'secondary');
+                    cell.innerHTML = '<span class="badge badge-' + cls + '">' + esc(v) + '</span>';
+                });
+            }
+        });
+    }
+
+    /* -- 4. read the findings out of the tables -------------------------- */
+    function cellByHeader(table, row, header) {
+        var i = columnIndex(table, header);
+        return i !== -1 && row.cells[i] ? text(row.cells[i]) : '';
+    }
+
+    function readFindings() {
+        var f = { disk: null, disks: [], memory: null, cpu: null, os: null, bios: null,
+                  servicesDown: 0, servicesUp: 0,
+                  errors: 0, apps: 0, updatesOk: 0, updatesBad: 0, localUsers: 0, admins: 0,
+                  /* Per-log tallies as well as the total, so the section badge can mark
+                     the log the errors came from. Keyed by summary text. */
+                  errorsByLog: {}, eventDays: {} };
+
+        var diskTable = tableWithHeader('DiskUsage(%)');
+        if (diskTable) {
+            var uCol = columnIndex(diskTable, 'DiskUsage(%)');
+            var dCol = columnIndex(diskTable, 'DeviceID');
+            var vCol = columnIndex(diskTable, 'VolumeName');
+            var fCol = columnIndex(diskTable, 'FreeDisk(GB)');
+            var tCol = columnIndex(diskTable, 'TotalDisk(GB)');
+            dataRows(diskTable).forEach(function (row) {
+                var pct = parseFloat(row.getAttribute('data-usage') || text(row.cells[uCol]));
+                if (isNaN(pct)) { return; }
+                var entry = {
+                    pct: pct,
+                    name: dCol !== -1 ? text(row.cells[dCol]) : 'Disk',
+                    volume: vCol !== -1 ? text(row.cells[vCol]) : '',
+                    free: fCol !== -1 ? text(row.cells[fCol]) : null,
+                    total: tCol !== -1 ? text(row.cells[tCol]) : null
+                };
+                f.disks.push(entry);
+                /* f.disk is the busiest drive - the one worth leading with. */
+                if (!f.disk || pct > f.disk.pct) { f.disk = entry; }
+            });
+        }
+
+        /* Identity facts for the System panel. */
+        var osTable = tableInSection('OS');
+        if (osTable) {
+            var or_ = dataRows(osTable)[0];
+            if (or_) {
+                f.os = {
+                    caption: cellByHeader(osTable, or_, 'Caption'),
+                    version: cellByHeader(osTable, or_, 'Version'),
+                    build:   cellByHeader(osTable, or_, 'BuildNumber'),
+                    boot:    cellByHeader(osTable, or_, 'LastBootTime'),
+                    user:    cellByHeader(osTable, or_, 'RegisteredUser')
+                };
+            }
+        }
+        var biosTable = tableInSection('BIOS');
+        if (biosTable) {
+            var br = dataRows(biosTable)[0];
+            if (br) {
+                f.bios = {
+                    maker:  cellByHeader(biosTable, br, 'Manufacturer'),
+                    serial: cellByHeader(biosTable, br, 'SerialNumber'),
+                    ver:    cellByHeader(biosTable, br, 'SMBIOSBIOSVersion')
+                };
+            }
+        }
+
+        var memTable = tableWithHeader('MemoryUsage(%)');
+        if (memTable) {
+            var mCol = columnIndex(memTable, 'MemoryUsage(%)');
+            var mFree = columnIndex(memTable, 'FreeMemory(GB)');
+            var mTot = columnIndex(memTable, 'TotalMemory(GB)');
+            var r = dataRows(memTable)[0];
+            if (r) {
+                var mv = parseFloat(r.getAttribute('data-usage') || text(r.cells[mCol]));
+                if (!isNaN(mv)) {
+                    f.memory = { pct: mv,
+                                 free: mFree !== -1 ? text(r.cells[mFree]) : null,
+                                 total: mTot !== -1 ? text(r.cells[mTot]) : null };
+                }
+            }
+        }
+
+        var cpuTable = tableWithHeader('LoadPercentage');
+        if (cpuTable) {
+            var cCol = columnIndex(cpuTable, 'LoadPercentage');
+            var cr = dataRows(cpuTable)[0];
+            if (cr) {
+                var cv = parseFloat(cr.getAttribute('data-usage') || text(cr.cells[cCol]));
+                if (!isNaN(cv)) {
+                    f.cpu = {
+                        pct: cv,
+                        name: cellByHeader(cpuTable, cr, 'Name'),
+                        cores: cellByHeader(cpuTable, cr, 'NumberOfCores'),
+                        threads: cellByHeader(cpuTable, cr, 'NumberOfLogicalProcessors')
+                    };
+                }
+            }
+        }
+
+        var stopAuto = tableInSection('Stop and Automatic Services');
+        if (stopAuto) { f.servicesDown = dataRows(stopAuto).length; }
+        var runAuto = tableInSection('Active and Automatic Services');
+        if (runAuto) { f.servicesUp = dataRows(runAuto).length; }
+
+        var appsTable = tableInSection('Installed Applications');
+        if (appsTable) { f.apps = dataRows(appsTable).length; }
+
+        var updTable = tableInSection('Last 20 Updates');
+        if (updTable) {
+            var rCol = columnIndex(updTable, 'Result');
+            if (rCol !== -1) {
+                dataRows(updTable).forEach(function (row) {
+                    var v = text(row.cells[rCol]);
+                    if (/Succeeded/.test(v)) { f.updatesOk++; }
+                    else if (/Failed|Aborted/.test(v)) { f.updatesBad++; }
+                });
+            }
+        }
+
+        var usersTable = tableInSection('Local Users');
+        if (usersTable) { f.localUsers = dataRows(usersTable).length; }
+        var adminTable = tableInSection('Users in Administrator Group');
+        if (adminTable) { f.admins = dataRows(adminTable).length; }
+
+        ['Event Log: Application', 'Event Log: System'].forEach(function (name) {
+            f.errorsByLog[name] = 0;
+            var t = tableInSection(name);
+            if (!t) { return; }
+            var lvl = columnIndex(t, 'LevelDisplayName');
+            var when = columnIndex(t, 'TimeCreated');
+            dataRows(t).forEach(function (row) {
+                var v = lvl !== -1 ? text(row.cells[lvl]) : '';
+                if (v !== 'Error' && v !== 'Critical') { return; }
+                f.errors++;
+                f.errorsByLog[name]++;
+                if (when === -1) { return; }
+                var day = text(row.cells[when]).split(' ')[0];
+                if (day) { f.eventDays[day] = (f.eventDays[day] || 0) + 1; }
+            });
         });
 
-        //Custom Scripts: --> event log Table Update : Set cell colour based on error critical warning
-        document.addEventListener('DOMContentLoaded', function() 
-        { var eventLogSection = document.getElementById('tab-eventlogs');
-          var table = eventLogSection.getElementsByTagName('table')[1];
-          if(table) 
-          { var rows = table.rows;
-            var columnName = rows[0].cells[2];
-            if(columnName.innerHTML === 'LevelDisplayName') 
-            { for(let i = 1; i < rows.length; i++) 
-              { var cell = rows[i].cells[2];
-                var value = cell.innerHTML;
-                if(value === 'Critical') { cell.classList.add('table-cell-red'); }
-                if(value === 'Error') { cell.classList.add('table-cell-red'); }
-                if(value === 'Warning') { cell.classList.add('table-cell-amber'); }
-              }
+        return f;
+    }
+
+    /* -- 5. the dashboard ---------------------------------------------------
+       Three tiers: the verdict, what is going on (resources + identity), then what
+       to do about it (ranked issues + the error trend).                     */
+
+    /* One description per check, shared by the chips and the sidebar so they agree. */
+    function checkItems(f) {
+        function worst() {
+            var s = 'ok', i;
+            for (i = 0; i < arguments.length; i++) {
+                if (arguments[i] === 'crit') { return 'crit'; }
+                if (arguments[i] === 'warn') { s = 'warn'; }
             }
-            else 
-            { alert('The Disk Table has changed position and will not be colour coded. Please contact the author of this report to resolve the problem.' + columnName.innerHTML);
-            }
-          }
-          else 
-          { console.error('No table found in the tab-eventlogs section.');
-          }
+            return s;
+        }
+        var hwSev = worst(f.disk ? severityFor(f.disk.pct) : 'ok',
+                          f.memory ? severityFor(f.memory.pct) : 'ok',
+                          f.cpu ? severityFor(f.cpu.pct) : 'ok');
+        var hwNotes = [];
+        if (f.disk)   { hwNotes.push(f.disk.name + ' at ' + f.disk.pct.toFixed(0) + '%'); }
+        if (f.memory) { hwNotes.push('memory at ' + f.memory.pct.toFixed(0) + '%'); }
+
+        return [
+            { tab: 'tab-hardware', name: 'Hardware', sev: hwSev,
+              note: hwNotes.join(' · ') || 'No hardware readings' },
+            { tab: 'tab-os', name: 'OS', sev: f.os ? 'ok' : 'warn',
+              note: f.os ? 'Operating system details read' : 'Not read' },
+            { tab: 'tab-user', name: 'Users', sev: 'ok',
+              note: f.localUsers + ' local, ' + f.admins + ' administrators' },
+            { tab: 'tab-services', name: 'Services', sev: f.servicesDown > 0 ? 'warn' : 'ok',
+              note: f.servicesDown > 0 ? (f.servicesDown + ' automatic services stopped')
+                                       : (f.servicesUp + ' running as expected') },
+            { tab: 'tab-applications', name: 'Apps', sev: 'ok', note: f.apps + ' installed' },
+            { tab: 'tab-updates', name: 'Updates', sev: f.updatesBad > 0 ? 'warn' : 'ok',
+              note: f.updatesOk + ' succeeded, ' + f.updatesBad + ' failed' },
+            { tab: 'tab-eventlogs', name: 'Events', sev: f.errors > 0 ? 'warn' : 'ok',
+              note: f.errors + (f.errors === 1 ? ' error logged' : ' errors logged') }
+        ];
+    }
+
+    /* Everything worth acting on, worst first. */
+    function issuesFrom(f) {
+        var out = [];
+        f.disks.forEach(function (d) {
+            var sev = severityFor(d.pct);
+            if (sev === 'ok') { return; }
+            out.push({ sev: sev, tab: 'tab-hardware',
+                       title: d.name + ' drive is ' + (sev === 'crit' ? 'nearly full' : 'filling up'),
+                       note: d.free ? (d.free + ' GB free of ' + d.total + ' GB') : '',
+                       value: d.pct.toFixed(1) + '%' });
+        });
+        if (f.memory && severityFor(f.memory.pct) !== 'ok') {
+            out.push({ sev: severityFor(f.memory.pct), tab: 'tab-hardware',
+                       title: 'Memory is under pressure',
+                       note: f.memory.free ? (f.memory.free + ' GB free of ' + f.memory.total + ' GB') : '',
+                       value: f.memory.pct.toFixed(1) + '%' });
+        }
+        if (f.cpu && severityFor(f.cpu.pct) !== 'ok') {
+            out.push({ sev: severityFor(f.cpu.pct), tab: 'tab-hardware',
+                       title: 'CPU load is high', note: 'Reading taken at scan time',
+                       value: f.cpu.pct.toFixed(0) + '%' });
+        }
+        if (f.servicesDown > 0) {
+            out.push({ sev: 'warn', tab: 'tab-services',
+                       title: 'Automatic services are not running',
+                       note: 'Set to start automatically, out of ' + (f.servicesUp + f.servicesDown),
+                       value: String(f.servicesDown) });
+        }
+        if (f.updatesBad > 0) {
+            out.push({ sev: 'warn', tab: 'tab-updates',
+                       title: 'Windows updates failed',
+                       note: 'Of the last ' + (f.updatesOk + f.updatesBad) + ' update attempts',
+                       value: String(f.updatesBad) });
+        }
+        if (f.errors > 0) {
+            out.push({ sev: 'warn', tab: 'tab-eventlogs',
+                       title: 'Errors in the event logs',
+                       note: 'Error and critical events in the sampled window',
+                       value: String(f.errors) });
+        }
+        var rank = { crit: 0, warn: 1 };
+        out.sort(function (a, b) { return rank[a.sev] - rank[b.sev]; });
+        return out;
+    }
+
+    function meter(pct, sev) {
+        return '<div class="progress" role="img" aria-label="' + pct.toFixed(1) + ' percent">' +
+                 '<div class="progress-bar is-' + sev + '" style="width:' + Math.min(pct, 100) + '%"></div>' +
+                 '<span class="progress-tick" style="left:70%"></span>' +
+                 '<span class="progress-tick" style="left:90%"></span>' +
+               '</div>';
+    }
+    function metricRow(name, sub, pct) {
+        var sev = severityFor(pct);
+        /* name/sub carry DeviceID and VolumeName, both set on the scanned host. */
+        return '<div class="metric">' +
+                 '<div class="metric-head">' +
+                   '<span><span class="metric-name">' + esc(name) + '</span>' +
+                   (sub ? ' <span class="metric-sub">' + esc(sub) + '</span>' : '') + '</span>' +
+                   '<span class="metric-val is-' + sev + '">' + pct.toFixed(1) + '%</span>' +
+                 '</div>' + meter(pct, sev) +
+               '</div>';
+    }
+    /* body is markup the functions above already escaped; title/desc are literals,
+       escaped anyway so a future caller can't quietly reopen the hole. */
+    function cardShell(title, desc, body) {
+        return '<div class="card-header"><h2 class="card-title">' + esc(title) + '</h2>' +
+               (desc ? '<p class="card-desc">' + esc(desc) + '</p>' : '') + '</div>' +
+               '<div class="card-content">' + body + '</div>';
+    }
+
+    function buildDashboard(f) {
+        var items = checkItems(f);
+        var issues = issuesFrom(f);
+        var attention = items.filter(function (i) { return i.sev !== 'ok'; });
+        var anyCrit = items.some(function (i) { return i.sev === 'crit'; });
+        var mood = attention.length === 0 ? 'ok' : (anyCrit ? 'crit' : 'warn');
+
+        /* --- hero: the verdict, then every check as a chip --- */
+        var hero = document.getElementById('dash-hero');
+        var headline = attention.length === 0
+            ? 'Everything looks healthy'
+            : attention.length + (attention.length === 1 ? ' check needs attention' : ' checks need attention');
+        /* Titles as written: lower-casing turned "D: drive" into "d: drive" and broke
+           the one identifier in the sentence. */
+        var summary = issues.length
+            ? issues.slice(0, 3).map(function (i) { return i.title; }).join(' · ')
+            : 'All ' + items.length + ' checks completed with nothing to action.';
+
+        hero.className = 'card hero is-' + mood;
+        hero.innerHTML =
+            '<div class="hero-top">' +
+              '<span class="hero-icon">' + icon(mood === 'ok' ? 'ok' : 'warn') + '</span>' +
+              '<div><h2>' + esc(headline) + '</h2><p>' + esc(summary) + '</p></div>' +
+            '</div>' +
+            '<div class="hero-chips">' +
+              items.map(function (it) {
+                  return '<button type="button" class="chip-check" data-tab="' + esc(it.tab) + '">' +
+                           '<span class="chip-dot is-' + esc(it.sev) + '"></span>' + esc(it.name) +
+                         '</button>';
+              }).join('') +
+            '</div>';
+
+        /* --- resources: every drive, then memory and CPU --- */
+        var rows = f.disks.map(function (d) {
+            return metricRow(d.name + ' drive', d.volume || '', d.pct);
+        });
+        if (f.memory) { rows.push(metricRow('Memory', f.memory.total ? f.memory.total + ' GB total' : '', f.memory.pct)); }
+        if (f.cpu)    { rows.push(metricRow('CPU load', f.cpu.cores ? f.cpu.cores + ' cores / ' + f.cpu.threads + ' threads' : '', f.cpu.pct)); }
+        document.getElementById('dash-resources').innerHTML =
+            cardShell('Resources', 'Ticks mark the 70% and 90% thresholds',
+                      rows.length ? rows.join('') : '<p class="card-desc">No resource readings were returned.</p>');
+
+        /* --- system identity --- */
+        var facts = [];
+        /* Every value comes straight out of a table cell: OS Caption, RegisteredUser, CPU
+           Name, BIOS manufacturer and SerialNumber are all host-supplied strings. */
+        function fact(k, v) { if (v) { facts.push('<dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd>'); } }
+        if (f.os) {
+            fact('OS', f.os.caption);
+            fact('Version', f.os.version + (f.os.build ? ' (build ' + f.os.build + ')' : ''));
+            fact('Last boot', f.os.boot);
+            fact('Registered', f.os.user);
+        }
+        if (f.cpu)  { fact('CPU', f.cpu.name); }
+        if (f.bios) {
+            fact('BIOS', [f.bios.maker, f.bios.ver].filter(Boolean).join(' · '));
+            fact('Serial', f.bios.serial);
+        }
+        fact('Local users', f.localUsers ? (f.localUsers + ' (' + f.admins + ' administrators)') : '');
+        fact('Applications', f.apps ? String(f.apps) : '');
+        document.getElementById('dash-system').innerHTML =
+            cardShell('System', null,
+                      facts.length ? '<dl class="facts">' + facts.join('') + '</dl>'
+                                   : '<p class="card-desc">No system details were returned.</p>');
+
+        /* --- ranked actions --- */
+        var body = issues.length
+            ? issues.map(function (i) {
+                  /* i.title / i.note carry the drive's DeviceID and VolumeName. */
+                  return '<div class="issue">' +
+                           '<span class="issue-icon is-' + esc(i.sev) + '">' + icon(i.sev) + '</span>' +
+                           '<span class="issue-body">' +
+                             '<span class="issue-title">' + esc(i.title) + '</span><br>' +
+                             '<span class="issue-note">' + esc(i.note) + '</span>' +
+                           '</span>' +
+                           '<span class="issue-val is-' + esc(i.sev) + '">' + esc(i.value) + '</span>' +
+                         '</div>';
+              }).join('')
+            : '<div class="alert"><span class="alert-icon">' + icon('ok') + '</span>' +
+              '<div><p class="alert-title">Nothing to action</p>' +
+              '<p class="alert-desc">No threshold was crossed and no check reported a failure.</p></div></div>';
+        document.getElementById('dash-attention').innerHTML =
+            cardShell('Needs attention', issues.length ? 'Worst first' : null, body);
+
+        /* Chips navigate to the same places as the sidebar. */
+        Array.prototype.slice.call(document.querySelectorAll('.chip-check')).forEach(function (c) {
+            c.addEventListener('click', function () { opentab(c.getAttribute('data-tab')); });
         });
 
-    </script>
+        /* Headline verdict, mirrored in the sidebar footer. */
+        var badge = document.getElementById('verdict-badge');
+        if (attention.length === 0) {
+            badge.className = 'badge badge-ok';
+            badge.innerHTML = icon('ok') + 'All checks healthy';
+        } else {
+            badge.className = 'badge badge-' + (anyCrit ? 'crit' : 'warn');
+            badge.innerHTML = icon('warn') + attention.length +
+                (attention.length === 1 ? ' check needs attention' : ' checks need attention');
+        }
+
+        paintSidebar(items);
+    }
+
+
+    /* -- 6b. sidebar: icon per section, status dot where it matters -------- */
+    function paintSidebar(items) {
+        var sevByTab = {};
+        items.forEach(function (it) { sevByTab[it.tab] = it.sev; });
+
+        Array.prototype.slice.call(document.querySelectorAll('#sidebar-nav button')).forEach(function (btn) {
+            var tab = btn.getAttribute('data-tab');
+            var name = btn.getAttribute('data-icon');
+            var sev = sevByTab[tab] || 'ok';
+
+            /* Prepend the icon rather than rewrite the button, so the label survives
+               even if this never runs. */
+            var svg = document.createElement('span');
+            svg.className = 'nav-icon';
+            svg.innerHTML = icon(name);
+            btn.insertBefore(svg, btn.firstChild);
+
+            if (tab !== 'tab-dashboard') {
+                var dot = document.createElement('span');
+                dot.className = 'nav-status is-' + sev;
+                if (sev !== 'ok') { dot.title = sev === 'crit' ? 'Needs attention' : 'Warning'; }
+                btn.appendChild(dot);
+            }
+        });
+    }
+
+    /* -- 7. per-section badges, and open what is broken -------------------- */
+    function markSections(f) {
+        function tag(summaryText, cls, label, openIt) {
+            var sec = sectionFor(summaryText);
+            if (!sec) { return; }
+            var sum = sec.querySelector('summary');
+            if (!sum) { return; }
+            if (label) {
+                var wrap = document.createElement('span');
+                wrap.className = 'summary-badges';
+                /* label carries the drive name for the Disk badge. */
+                wrap.innerHTML = '<span class="badge badge-' + esc(cls) + '">' + esc(label) + '</span>';
+                sum.appendChild(wrap);
+            }
+            if (openIt) { sec.setAttribute('open', 'open'); }
+        }
+
+        if (f.disk) {
+            var ds = severityFor(f.disk.pct);
+            if (ds !== 'ok') { tag('Disk', ds, f.disk.name + ' at ' + f.disk.pct.toFixed(0) + '%', true); }
+        }
+        if (f.memory) {
+            var ms = severityFor(f.memory.pct);
+            if (ms !== 'ok') { tag('Memory', ms, f.memory.pct.toFixed(0) + '% used', true); }
+        }
+        if (f.servicesDown > 0) {
+            tag('Stop and Automatic Services', 'warn', f.servicesDown + ' not running', true);
+        }
+        /* Badge the log the errors were found in. Tagging 'Event Log: System' whenever
+           f.errors was non-zero pointed an Application-only problem at the empty System
+           log, because f.errors is the sum of both. */
+        Object.keys(f.errorsByLog).forEach(function (name) {
+            var n = f.errorsByLog[name];
+            if (n > 0) { tag(name, 'warn', n + (n === 1 ? ' error' : ' errors'), true); }
+        });
+
+        /* Every section gets a chevron so the affordance is obvious. */
+        Array.prototype.slice.call(document.getElementsByTagName('details')).forEach(function (d) {
+            var sum = d.querySelector('summary');
+            if (!sum || sum.querySelector('.chevron')) { return; }
+            var sv = document.createElementNS(SVG, 'svg');
+            sv.setAttribute('class', 'icon chevron');
+            sv.setAttribute('viewBox', '0 0 24 24');
+            sv.setAttribute('fill', 'none');
+            sv.setAttribute('stroke', 'currentColor');
+            sv.setAttribute('stroke-width', '2');
+            sv.setAttribute('stroke-linecap', 'round');
+            sv.setAttribute('stroke-linejoin', 'round');
+            var p = document.createElementNS(SVG, 'path');
+            p.setAttribute('d', 'm6 9 6 6 6-6');
+            sv.appendChild(p);
+            sum.appendChild(sv);
+        });
+    }
+
+    /* -- 8. error histogram ------------------------------------------------
+       One series, so no legend - the card title names it. Only the peak is labelled;
+       a number on every bar would be noise.                                 */
+    function buildChart(f) {
+        var days = Object.keys(f.eventDays);
+        if (days.length < 2) { return; }
+
+        days.sort(function (a, b) { return toDate(a) - toDate(b); });
+
+        var card = document.getElementById('event-chart-card');
+        var bars = document.getElementById('bars');
+        var axis = document.getElementById('axis');
+        card.classList.remove('is-hidden');
+
+        var peak = days.reduce(function (m, d) { return Math.max(m, f.eventDays[d]); }, 0);
+
+        days.forEach(function (d) {
+            var n = f.eventDays[d];
+            var col = document.createElement('div');
+            col.className = 'bar-col';
+            col.setAttribute('data-count', n);
+            col.setAttribute('data-day', d);
+            if (n === peak) {
+                var lbl = document.createElement('span');
+                lbl.className = 'bar-peak';
+                lbl.textContent = n;
+                col.appendChild(lbl);
+            }
+            var bar = document.createElement('div');
+            bar.className = 'bar';
+            bar.style.height = (n / peak * 82) + '%';
+            col.appendChild(bar);
+            bars.appendChild(col);
+
+            var tick = document.createElement('span');
+            tick.textContent = shortDay(d);
+            axis.appendChild(tick);
+        });
+    }
+    /* Dates arrive in the host's locale format: parse defensively and fall back to
+       string order rather than throwing. */
+    function toDate(s) {
+        var p = s.split(/[-\/]/);
+        if (p.length === 3) {
+            var y = p[2].length === 4 ? p[2] : p[0];
+            var d = p[2].length === 4 ? p[0] : p[2];
+            return new Date(y, (parseInt(p[1], 10) || 1) - 1, parseInt(d, 10) || 1).getTime();
+        }
+        return 0;
+    }
+    function shortDay(s) {
+        var p = s.split(/[-\/]/);
+        return p.length === 3 ? (p[0] + '/' + p[1]) : s;
+    }
+
+    /* -- boot ------------------------------------------------------------- */
+    document.addEventListener('DOMContentLoaded', function () {
+        var findings;
+        try {
+            wrapTables();
+            typeCells();
+            findings = readFindings();
+            decorateMetrics();
+            buildDashboard(findings);
+            markSections(findings);
+            buildChart(findings);
+        } catch (e) {
+            /* A summary that can't be built must never hide the report itself. */
+            if (window.console && console.error) { console.error('ServerVitals summary failed:', e); }
+            var badge = document.getElementById('verdict-badge');
+            if (badge) {
+                badge.className = 'badge badge-outline';
+                badge.textContent = 'Summary unavailable';
+            }
+        }
+    });
+}());
+
+/* Section switching. Visibility is a class, not an inline style, so the print sheet
+   can override it and show every section at once. */
+function opentab(tabId) {
+    var sections = document.getElementsByClassName('tab'), i;
+    for (i = 0; i < sections.length; i++) {
+        sections[i].classList.toggle('is-active', sections[i].id === tabId);
+    }
+    var buttons = document.querySelectorAll('#sidebar-nav button');
+    for (i = 0; i < buttons.length; i++) {
+        buttons[i].classList.toggle('button-clicked', buttons[i].getAttribute('data-tab') === tabId);
+    }
+    /* Keep the top of the new section in view on a short window. */
+    var main = document.querySelector('.content');
+    if (main && main.getBoundingClientRect().top < 0) {
+        main.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+}
+
+function openModal()  { document.getElementById('modal').classList.add('is-open'); }
+function closeModal() { document.getElementById('modal').classList.remove('is-open'); }
+
+document.addEventListener('DOMContentLoaded', function () {
+    Array.prototype.slice.call(document.querySelectorAll('#sidebar-nav button')).forEach(function (btn) {
+        btn.addEventListener('click', function () { opentab(btn.getAttribute('data-tab')); });
+    });
+    document.getElementById('btn-report-info').addEventListener('click', openModal);
+    document.getElementById('btn-modal-close').addEventListener('click', closeModal);
+});
+
+window.addEventListener('click', function (event) {
+    var modal = document.getElementById('modal');
+    if (event.target === modal) { closeModal(); }
+});
+window.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') { closeModal(); }
+});
+</script>
 </body>
 </html>
