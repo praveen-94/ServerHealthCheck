@@ -246,46 +246,73 @@ function Read-Prompt
 function Show-Banner
 { param([string]$Version = '1.0.0')
 
-  $avail = (Get-CardWidth) - 2        # the shared card width, minus its two borders
+  $boxWidth = Get-CardWidth
 
-  $rows = @(
-    @{ PlainL = 'ServerVitals'
-       TextL  = Get-GradientText 'ServerVitals' -Bold
-       PlainR = 'Console Edition'
-       TextR  = Paint 'Console Edition' 'Teal' }
-    @{ PlainL = 'Windows server health check'
-       TextL  = Paint 'Windows server health check' 'Gray'
-       PlainR = "v$Version"
-       TextR  = Paint "v$Version" 'Dim' }
+  $hl = [string][char]0x2500
+  $tl = [string][char]0x250C
+  $tr = [string][char]0x2510
+  $vl = [string][char]0x2502
+  $bl = [string][char]0x2514
+  $br = [string][char]0x2518
+
+  # Official FIGlet ANSI Shadow Logo for SERVER (49 chars wide)
+  $serverLines = @(
+    '███████╗███████╗██████╗ ██╗   ██╗███████╗██████╗ ',
+    '██╔════╝██╔════╝██╔══██╗██║   ██║██╔════╝██╔══██╗',
+    '███████╗█████╗  ██████╔╝██║   ██║█████╗  ██████╔╝',
+    '╚════██║██╔══╝  ██╔══██╗╚██╗ ██╔╝██╔══╝  ██╔══██╗',
+    '███████║███████╗██║  ██║ ╚████╔╝ ███████╗██║  ██║',
+    '╚══════╝╚══════╝╚═╝  ╚═╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝'
   )
 
-  # Widest row decides the card; a row occupies BoxPad + left + >=1 space + right + BoxPad.
-  $fixed  = (2 * $script:BoxPad.Length) + 1
-  $needed = 0
-  foreach($r in $rows) { $n = $r.PlainL.Length + $r.PlainR.Length + $fixed; if($n -gt $needed) { $needed = $n } }
-  if($avail -lt $needed)
-  { # Too narrow for both: keep the wordmark, drop the right-hand column rather than wrap.
-    foreach($r in $rows) { $r.PlainR = ''; $r.TextR = '' }
-    $needed = 0
-    foreach($r in $rows) { $n = $r.PlainL.Length + $fixed; if($n -gt $needed) { $needed = $n } }
-  }
-  $inner = [math]::Max($needed, $avail)
-
-  $bl = Paint '│' 'Cyan'              # borders take the two ends of the gradient
-  $br = Paint '│' 'Purple'
+  # Official FIGlet ANSI Shadow Logo for VITALS (45 chars wide)
+  $vitalsLines = @(
+    '██╗   ██╗██╗████████╗ █████╗ ██╗     ███████╗',
+    '██║   ██║██║╚══██╔══╝██╔══██╗██║     ██╔════╝',
+    '██║   ██║██║   ██║   ███████║██║     ███████╗',
+    '╚██╗ ██╔╝██║   ██║   ██╔══██║██║     ╚════██║',
+    ' ╚████╔╝ ██║   ██║   ██║  ██║███████╗███████║',
+    '  ╚═══╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝'
+  )
 
   Write-Host ''
-  Write-Host ($script:BannerGutter + (Get-GradientText ('╭' + ('─' * $inner) + '╮')))
-  foreach($r in $rows)
-  { $pad = $inner - (2 * $script:BoxPad.Length) - $r.PlainL.Length - $r.PlainR.Length
-    if($pad -lt 1) { $pad = 1 }
-    Write-Host ($script:BannerGutter + $bl + $script:BoxPad + $r.TextL + (' ' * $pad) + $r.TextR + $script:BoxPad + $br)
+  for($i = 0; $i -lt 6; $i++)
+  { $combined = $serverLines[$i] + '  ' + $vitalsLines[$i]
+    $padL = [math]::Max(0, [math]::Floor(($boxWidth - $combined.Length) / 2))
+    $spacedLine = (' ' * $padL) + $combined
+    Write-Host (Get-GradientText -Text $spacedLine -From @(56,211,238) -To @(167,139,250) -Bold)
   }
-  Write-Host ($script:BannerGutter + (Get-GradientText ('╰' + ('─' * $inner) + '╯')))
+
+  Write-Host ''
+
+  # Boxed description card matching exact Get-CardWidth
+  $desc = 'Windows server health check'
+  $verTag = "v$Version"
+
+  # Top border
+  $topBorder = $tl + ($hl * ($boxWidth - 2)) + $tr
+  Write-Host (Paint $topBorder 'Gray')
+
+  # Middle description line
+  $innerSpace = $boxWidth - 2
+  $padLeft = [math]::Max(0, [math]::Floor(($innerSpace - $desc.Length) / 2))
+  $padRight = [math]::Max(0, $innerSpace - $desc.Length - $padLeft)
+  $midLine = $vl + (' ' * $padLeft) + $desc + (' ' * $padRight) + $vl
+  Write-Host (Paint $midLine 'White')
+
+  # Bottom border containing embedded version tag
+  $verPart = " $verTag "
+  $bLen = $boxWidth - 2 - $verPart.Length - 3
+  if($bLen -lt 2) { $bLen = 2 }
+  $botBorder = $bl + ($hl * $bLen) + $verPart + $hl + $br
+  if($botBorder.Length -lt $boxWidth)
+  { $diff = $boxWidth - $botBorder.Length
+    $botBorder = $bl + ($hl * ($bLen + $diff)) + $verPart + $hl + $br
+  }
+  Write-Host (Paint $botBorder 'Gray')
   Write-Host ''
 }
 
-#------------------------------------------------------------------------------
 # Info panel (key / value)
 #------------------------------------------------------------------------------
 function Show-InfoPanel
@@ -532,8 +559,8 @@ function Write-SectionTitle
   # the label to the card's right edge and turns down into the section, fading as it goes.
   $label = $Text.ToUpper()
   $used  = $script:SectionMark.Length + $script:Gap.Length + $label.Length + 1   # mark + gap + label + space
-  $rule  = (Get-CardWidth) - $used - 1                    # -1 for the ╮ terminator
+  $rule  = (Get-CardWidth) - $used - 1                    # -1 for the ┐ terminator
   # A heading too long for a rule prints alone - no dangling space.
-  $tail  = if($rule -gt 0) { ' ' + (Get-GradientText -Text (('─' * $rule) + '╮') -From @(167,139,250) -To @(71,85,105)) } else { '' }
+  $tail  = if($rule -gt 0) { ' ' + (Get-GradientText -Text (('─' * $rule) + [string][char]0x2510) -From @(167,139,250) -To @(71,85,105)) } else { '' }
   Write-Host ((Paint $script:SectionMark 'Purple') + $script:Gap + (Paint $label 'WhiteB') + $tail)
 }
