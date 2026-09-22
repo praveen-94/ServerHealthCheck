@@ -176,7 +176,7 @@ foreach($required in @(@{ Key = 'CoreScriptsPath';  What = 'health-check script'
 #--- Prepare log / output directories (archive previous run) ------------------
 # Archive OUR OWN artifacts only, so a user -OutputPath holding their files is never
 # bulk-swept. These patterns cover everything this run writes.
-$ourArtifacts = @('ServerHealthReport.csv', 'serverVital*.log',
+$ourArtifacts = @('ServerHealthReport.csv', 'ServerHealthReport.json', 'serverVital*.log',
                   # Legacy names: no longer written, archived so an older output folder ends clean.
                   'HealthCheckReport_*.html', 'ServerHealthReport.html')
 # Per-server reports get their own sub-folder, so the output folder stays readable at scale.
@@ -472,7 +472,7 @@ catch
 $jsonPath = Join-Path $Config.logPath 'ServerHealthReport.json'
 try
 { $rawJson = $plainResults | ConvertTo-Json -Depth 5
-  $jsonText = if($plainResults.Count -eq 1) { "[`n" + $rawJson + "`n]" } else { $rawJson }
+  $jsonText = if($plainResults.Count -eq 0) { '[]' } elseif($plainResults.Count -eq 1) { "[`n" + $rawJson + "`n]" } else { $rawJson }
   [System.IO.File]::WriteAllText($jsonPath, $jsonText, (New-Object System.Text.UTF8Encoding($true)))
   Write-Log -Message "Summary JSON exported to $jsonPath" -Level 'SUCCESS' -LogPath $LogHCU -NoConsole
   $jsonWritten = $true

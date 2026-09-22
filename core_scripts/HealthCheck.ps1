@@ -151,7 +151,7 @@ function Get-ServerHealth
         # CIM returns LastBootUpTime as a real DateTime. The old ConvertToDateTime() was a
         # method on the WMI object; under PowerShell 7 that object arrives deserialized via
         # the WinPS compatibility shim with no methods at all, so the column rendered blank.
-        $OSInfo = $OSDetails | Select-Object -Property Organization,RegisteredUser,CSName,Caption,BuildNumber,ServicePackMajorVersion,Version, @{Name='LastBootTime';Expression={$_.LastBootUpTime}} | ConvertTo-HTML -Fragment
+        $OSInfo = $OSDetails | Select-Object -Property Organization,RegisteredUser,CSName,Caption,BuildNumber,ServicePackMajorVersion,Version, @{Name='LastBootTime';Expression={ if($_.LastBootUpTime -is [datetime]) { $_.LastBootUpTime.ToString('yyyy-MM-dd HH:mm:ss') } else { $_.LastBootUpTime } }} | ConvertTo-HTML -Fragment
         $OSCheck++
       }
       catch
@@ -202,9 +202,9 @@ function Get-ServerHealth
         $pfrResult = Invoke-CimMethod -CimSession $CimSession -Namespace 'root\cimv2' -ClassName StdRegProv -MethodName GetMultiStringValue `
             -Arguments @{ hDefKey = $HKLM; sSubKeyName = 'SYSTEM\CurrentControlSet\Control\Session Manager'; sValueName = 'PendingFileRenameOperations' } -ErrorAction Stop
         if($pfrResult.ReturnValue -eq 0 -and $pfrResult.sValue -and $pfrResult.sValue.Count -gt 0) { $RebootPending = $true; $RebootReasons += 'Pending File Rename' }
-        $UptimeDays = if($OSDetails -and $OSDetails.LastBootUpTime) { [math]::Floor(((Get-Date) - $OSDetails.LastBootUpTime).TotalDays) } else { 'Unknown' }
+        $UptimeDays = if($OSDetails -and $OSDetails.LastBootUpTime) { [int][math]::Floor(((Get-Date) - $OSDetails.LastBootUpTime).TotalDays) } else { 'Unknown' }
         $UptimeWarnDays = if($PathFiles -and $PathFiles.Thresholds -and $PathFiles.Thresholds.UptimeWarningDays) { [int]$PathFiles.Thresholds.UptimeWarningDays } else { 90 }
-        $UptimeWarning = if($UptimeDays -is [int] -and $UptimeDays -gt $UptimeWarnDays) { "Yes (>$UptimeWarnDays days)" } else { 'No' }
+        $UptimeWarning = if($UptimeDays -ne 'Unknown' -and [int]$UptimeDays -gt $UptimeWarnDays) { "Yes (>$UptimeWarnDays days)" } else { 'No' }
         $RebootInfo = [PSCustomObject]@{
             'Reboot Required' = if($RebootPending) { 'Yes' } else { 'No' }
             'Reason' = if($RebootReasons.Count -gt 0) { $RebootReasons -join ', ' } else { 'None' }

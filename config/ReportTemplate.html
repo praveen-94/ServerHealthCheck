@@ -929,6 +929,8 @@
                 dataRows(t).forEach(function (row) {
                     var cell = row.cells[col];
                     if (!cell) { return; }
+                    var pct = num(text(cell));
+                    if (isNaN(pct)) { return; }
                     var mType = (h === 'MemoryUsage(%)' ? 'mem' : (h === 'LoadPercentage' ? 'cpu' : (h === 'PagefileUsage(%)' ? 'page' : 'disk')));
                     var sev = severityFor(pct, mType);
                     cell.innerHTML =
@@ -988,6 +990,7 @@
                   servicesDown: 0, servicesUp: 0,
                   errors: 0, apps: 0, updatesOk: 0, updatesBad: 0, localUsers: 0, admins: 0,
                   netAdapters: 0, secIssues: 0,
+                  rebootRequired: false, rebootReason: '', uptimeWarning: false, uptimeDays: null,
                   /* Per-log tallies as well as the total, so the section badge can mark
                      the log the errors came from. Keyed by summary text. */
                   errorsByLog: {}, eventDays: {} };
@@ -1132,9 +1135,32 @@
         var rebootTable = tableInSection('Pending Reboot / Uptime');
         if (rebootTable) {
             var rCol = columnIndex(rebootTable, 'Reboot Required');
-            if (rCol !== -1) {
-                var rRow = dataRows(rebootTable)[0];
-                if (rRow && text(rRow.cells[rCol]) === 'Yes') { f.secIssues++; }
+            var rReasonCol = columnIndex(rebootTable, 'Reason');
+            var uWarnCol = columnIndex(rebootTable, 'Uptime Warning');
+            var uDaysCol = columnIndex(rebootTable, 'Uptime (Days)');
+            var rRow = dataRows(rebootTable)[0];
+            if (rRow) {
+                if (rCol !== -1 && text(rRow.cells[rCol]) === 'Yes') {
+                    f.rebootRequired = true;
+                    f.rebootReason = rReasonCol !== -1 ? text(rRow.cells[rReasonCol]) : '';
+                }
+                if (uWarnCol !== -1 && text(rRow.cells[uWarnCol]).indexOf('Yes') === 0) {
+                    f.uptimeWarning = true;
+                }
+                if (uDaysCol !== -1) {
+                    f.uptimeDays = text(rRow.cells[uDaysCol]);
+                }
+            }
+        }
+
+        var avTable = tableInSection('Antivirus Status');
+        if (avTable) {
+            var rtpCol = columnIndex(avTable, 'Real-Time Protection');
+            var avEnCol = columnIndex(avTable, 'Antivirus Enabled');
+            var avRow = dataRows(avTable)[0];
+            if (avRow) {
+                if (rtpCol !== -1 && text(avRow.cells[rtpCol]) === 'False') { f.secIssues++; }
+                if (avEnCol !== -1 && text(avRow.cells[avEnCol]) === 'False') { f.secIssues++; }
             }
         }
 
@@ -1165,8 +1191,10 @@
         return [
             { tab: 'tab-hardware', name: 'Hardware', sev: hwSev,
               note: hwNotes.join(' · ') || 'No hardware readings' },
-            { tab: 'tab-os', name: 'OS', sev: f.os ? 'ok' : 'warn',
-              note: f.os ? 'Operating system details read' : 'Not read' },
+            { tab: 'tab-os', name: 'OS', sev: (!f.os || f.rebootRequired || f.uptimeWarning) ? 'warn' : 'ok',
+              note: f.rebootRequired ? ('Reboot required: ' + (f.rebootReason || 'Pending update'))
+                    : (f.uptimeWarning ? ('High uptime: ' + f.uptimeDays + ' days')
+                    : (f.os ? 'Operating system details read' : 'Not read')) },
             { tab: 'tab-user', name: 'Users', sev: 'ok',
               note: f.localUsers + ' local, ' + f.admins + ' administrators' },
             { tab: 'tab-services', name: 'Services', sev: f.servicesDown > 0 ? 'warn' : 'ok',
@@ -1223,6 +1251,24 @@
                        title: 'Errors in the event logs',
                        note: 'Error and critical events in the sampled window',
                        value: String(f.errors) });
+        }
+        if (f.rebootRequired) {
+            out.push({ sev: 'warn', tab: 'tab-os',
+                       title: 'System reboot is pending',
+                       note: f.rebootReason ? ('Reason: ' + f.rebootReason) : 'A restart is required to finish installing updates',
+                       value: 'Reboot' });
+        }
+        if (f.uptimeWarning) {
+            out.push({ sev: 'warn', tab: 'tab-os',
+                       title: 'Server uptime is unusually high',
+                       note: 'Uptime has exceeded configured warning threshold (' + f.uptimeDays + ' days)',
+                       value: f.uptimeDays ? (f.uptimeDays + ' days') : 'Uptime' });
+        }
+        if (f.secIssues > 0) {
+            out.push({ sev: 'warn', tab: 'tab-security',
+                       title: 'Security settings need review',
+                       note: f.secIssues + (f.secIssues === 1 ? ' security issue found' : ' security issues found'),
+                       value: String(f.secIssues) });
         }
         var rank = { crit: 0, warn: 1 };
         out.sort(function (a, b) { return rank[a.sev] - rank[b.sev]; });
@@ -1420,6 +1466,11 @@
             var n = f.errorsByLog[name];
             if (n > 0) { tag(name, 'warn', n + (n === 1 ? ' error' : ' errors'), true); }
         });
+        if (f.rebootRequired) {
+            tag('Pending Reboot / Uptime', 'warn', 'Reboot required', true);
+        } else if (f.uptimeWarning) {
+            tag('Pending Reboot / Uptime', 'warn', 'High uptime (' + f.uptimeDays + 'd)', true);
+        }
 
         /* Every section gets a chevron so the affordance is obvious. */
         Array.prototype.slice.call(document.getElementsByTagName('details')).forEach(function (d) {
