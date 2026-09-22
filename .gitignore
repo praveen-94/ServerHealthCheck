@@ -11,7 +11,12 @@
 
 # Local AI assistant guidance - not part of the shipped tool
 CLAUDE.md
+GEMINI.md
+AGENTS.md
 .claude/
+.codex/
+.gemini/
+.agents/
 
 # Scratch file for composing commit messages (git commit -F commit-msg.txt)
 commit-msg.txt

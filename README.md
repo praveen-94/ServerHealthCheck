@@ -62,6 +62,7 @@ With no `-Servers`, the tool falls back to the CSV named in `config/Path.json` (
 | `-PassThru` | Also emit the per-server result objects to the pipeline. |
 | `-NoColor` | Disable ANSI colour (still uses UTF-8 glyphs). |
 | `-NoElevate` | Do not auto-relaunch elevated. |
+| `-Vitals` | Display modular Host Vitals cards (CPU, RAM, Disks, Net, OS) in the console for all scanned hosts. Automatically enabled for single-server scans. |
 
 ### Examples
 
@@ -72,6 +73,7 @@ With no `-Servers`, the tool falls back to the CSV named in `config/Path.json` (
 .\main.ps1 -Servers SERVER01 -PassThru          # emit result objects to the pipeline
 .\main.ps1 -Servers SERVER01 -NoColor           # no ANSI colour
 .\main.ps1 -Servers SERVER01 -NoElevate         # don't auto-relaunch elevated
+.\main.ps1 -Servers SERVER01,SERVER02 -Vitals   # show vitals cards for all hosts
 .\main.ps1 -Servers SERVER01 -TimeoutSeconds 300
 ```
 

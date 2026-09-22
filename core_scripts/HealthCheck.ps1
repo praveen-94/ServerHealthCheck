@@ -844,6 +844,66 @@ function Get-ServerHealth
       $AllValueCount = $HardWareCheck + $OSCheck + $UsersCheck + $ServiceCheck + $ApplicationCheck + $UpdateCheck + $EventLogCheck + $NetworkCheck + $SecurityCheck
       $AllGood = if($AllValueCount -eq 0){"No"} elseif($AllValueCount -lt $MaxScore){"Check File"} else{"Yes"}
 
+      # Build Host Vitals summary for console card
+      $UptimeSpan = if($OSDetails -and $OSDetails.LastBootUpTime -and ($OSDetails.LastBootUpTime -is [datetime])) {
+        (Get-Date) - $OSDetails.LastBootUpTime
+      } elseif($OSDetails -and $OSDetails.LastBootUpTime) {
+        try { (Get-Date) - [datetime]$OSDetails.LastBootUpTime } catch { $null }
+      } else { $null }
+
+      $UptimeStr = if($UptimeSpan) {
+        if($UptimeSpan.TotalDays -ge 1) { "{0}d {1}h" -f [int][math]::Floor($UptimeSpan.TotalDays), $UptimeSpan.Hours }
+        else { "{0}h {1}m" -f $UptimeSpan.Hours, $UptimeSpan.Minutes }
+      } else { 'Unknown' }
+
+      $CpuLoad = if($CPUDetails) { [int][math]::Round(($CPUDetails | Measure-Object -Property LoadPercentage -Average).Average) } else { 0 }
+      $CpuCores = if($CPUDetails) { [int]($CPUDetails | Measure-Object -Property NumberOfCores -Sum).Sum } else { 0 }
+      $CpuThreads = if($CPUDetails) { [int]($CPUDetails | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum } else { 0 }
+      $firstCpu = if($CPUDetails) { $CPUDetails | Select-Object -First 1 } else { $null }
+      $CpuClock = if($firstCpu -and $firstCpu.MaxClockSpeed) { [math]::Round($firstCpu.MaxClockSpeed / 1000, 1) } else { 0 }
+
+      $TotMemGB = if($MemoryDetails -and $MemoryDetails.TotalVisibleMemorySize) { [math]::Round($MemoryDetails.TotalVisibleMemorySize / 1MB, 1) } else { 0 }
+      $FreeMemGB = if($MemoryDetails -and $MemoryDetails.FreePhysicalMemory) { [math]::Round($MemoryDetails.FreePhysicalMemory / 1MB, 1) } else { 0 }
+      $UsedMemGB = [math]::Max(0.0, [math]::Round($TotMemGB - $FreeMemGB, 1))
+      $MemPct = if($TotMemGB -gt 0) { [int][math]::Round(($UsedMemGB / $TotMemGB) * 100) } else { 0 }
+
+      $DisksList = if($Disk) {
+        @($Disk | ForEach-Object {
+          $dSize = if($_.Size) { [math]::Round($_.Size / 1GB, 1) } else { 0 }
+          $dFree = if($_.FreeSpace) { [math]::Round($_.FreeSpace / 1GB, 1) } else { 0 }
+          $dPct = if($_.Size -gt 0) { [int][math]::Round((($_.Size - $_.FreeSpace) / $_.Size) * 100) } else { 0 }
+          [PSCustomObject]@{
+            Drive    = [string]$_.DeviceID
+            TotalGB  = $dSize
+            FreeGB   = $dFree
+            UsagePct = $dPct
+          }
+        })
+      } else { @() }
+
+      $PrimaryNet = if($NetAdapterDetails) { $NetAdapterDetails | Select-Object -First 1 } else { $null }
+      $NetDesc = if($PrimaryNet) { [string]$PrimaryNet.Description } else { '' }
+      $NetIP = if($PrimaryNet -and $PrimaryNet.IPAddress) {
+        ($PrimaryNet.IPAddress | Where-Object { $_ -notmatch ':' } | Select-Object -First 1)
+      } else { '' }
+
+      $Vitals = [PSCustomObject]@{
+        OSCaption     = if($OSDetails) { [string]$OSDetails.Caption } else { '' }
+        Uptime        = $UptimeStr
+        RebootPending = [bool]$RebootPending
+        CpuLoad       = $CpuLoad
+        CpuCores      = $CpuCores
+        CpuThreads    = $CpuThreads
+        CpuClockGHz   = $CpuClock
+        TotalMemGB    = $TotMemGB
+        UsedMemGB     = $UsedMemGB
+        FreeMemGB     = $FreeMemGB
+        MemUsagePct   = $MemPct
+        Disks         = $DisksList
+        NetDesc       = $NetDesc
+        NetIP         = $NetIP
+      }
+
       # Return the server health data
       return [PSCustomObject]@{
                 Server             = $ServerName
@@ -858,6 +918,7 @@ function Get-ServerHealth
                 Network_Check      = if($NetworkCheck -lt 1){$WarningSymbol} else{$SuccessSymbol}
                 Security_Check     = if($SecurityCheck -lt 5){$WarningSymbol} else{$SuccessSymbol}
                 All_Good           = $AllGood
+                Vitals             = $Vitals
             }
     }
     else
@@ -882,6 +943,7 @@ function Get-ServerHealth
                 Network_Check      = "N/A"
                 Security_Check     = "N/A"
                 All_Good           = "N/A"
+                Vitals             = $null
             }
     }
   }
@@ -900,6 +962,7 @@ function Get-ServerHealth
             Network_Check      = $FailedSymbol
             Security_Check     = $FailedSymbol
             All_Good           = "No"
+            Vitals             = $null
         }
   }
   finally

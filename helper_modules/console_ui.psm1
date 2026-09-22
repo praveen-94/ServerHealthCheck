@@ -211,6 +211,31 @@ function Get-ProgressBar
   return (Paint ('█' * $filled) $Color) + (Paint ('░' * ($Width - $filled)) 'Dim')
 }
 
+function Get-ResourceGauge
+{ param(
+    [double]$Percent,
+    [int]$Width = 10,
+    [int]$Warning = 70,
+    [int]$Critical = 90
+  )
+  if($Percent -lt 0) { $Percent = 0 }
+  $frac   = [math]::Min(1.0, [math]::Max(0.0, ($Percent / 100.0)))
+  $filled = [int][math]::Round($Width * $frac)
+  $empty  = [math]::Max(0, $Width - $filled)
+
+  $color  = if($Percent -ge $Critical)    { 'Red' }
+            elseif($Percent -ge $Warning) { 'Yellow' }
+            else                          { 'Green' }
+
+  $bracketL = Paint '[' 'Gray'
+  $barFill  = Paint ('█' * $filled) $color
+  $barEmpty = Paint ('░' * $empty) 'Dim'
+  $bracketR = Paint ']' 'Gray'
+  $pctText  = Format-Cell -Text ("{0,3:0}%" -f $Percent) -Width 4 -Align 'right' -Color $color
+
+  return "$bracketL$barFill$barEmpty$bracketR $pctText"
+}
+
 #------------------------------------------------------------------------------
 # Status lines (styled replacement for raw timestamped log echo)
 #------------------------------------------------------------------------------
@@ -552,6 +577,141 @@ function Show-RunSummary
     Write-Host ($script:Gutter + (Paint '│' 'Gray') + $script:BoxPad + $r.Text + $pad + $script:BoxPad + (Paint '│' 'Gray'))
   }
   Write-Host ($script:Gutter + (Paint ('└' + ('─' * $span) + '┘') 'Gray'))
+}
+
+#------------------------------------------------------------------------------
+# Host Vitals Card (modular dashboard box)
+#------------------------------------------------------------------------------
+function Show-HostVitalsCard
+{ param(
+    [Parameter(Mandatory)][string]$Server,
+    [Parameter(Mandatory)][object]$Vitals,
+    [object]$Thresholds
+  )
+  if(-not $Vitals) { return }
+
+  $cpuWarn  = if($Thresholds -and $Thresholds.CpuUsageWarningPercent)    { [int]$Thresholds.CpuUsageWarningPercent } else { 70 }
+  $cpuCrit  = if($Thresholds -and $Thresholds.CpuUsageCriticalPercent)   { [int]$Thresholds.CpuUsageCriticalPercent } else { 90 }
+  $memWarn  = if($Thresholds -and $Thresholds.MemoryUsageWarningPercent) { [int]$Thresholds.MemoryUsageWarningPercent } else { 70 }
+  $memCrit  = if($Thresholds -and $Thresholds.MemoryUsageCriticalPercent){ [int]$Thresholds.MemoryUsageCriticalPercent } else { 90 }
+  $diskWarn = if($Thresholds -and $Thresholds.DiskUsageWarningPercent)   { [int]$Thresholds.DiskUsageWarningPercent } else { 70 }
+  $diskCrit = if($Thresholds -and $Thresholds.DiskUsageCriticalPercent)  { [int]$Thresholds.DiskUsageCriticalPercent } else { 90 }
+
+  $rows = [System.Collections.Generic.List[hashtable]]::new()
+
+  # 1. CPU row
+  $cpuGauge = Get-ResourceGauge -Percent $Vitals.CpuLoad -Width 10 -Warning $cpuWarn -Critical $cpuCrit
+  $cpuGaugePlain = "[{0}] {1,3:0}%" -f ('█' * 10), $Vitals.CpuLoad
+  $cpuCoreInfo = if($Vitals.CpuCores -gt 0) {
+    if($Vitals.CpuThreads -gt $Vitals.CpuCores) {
+      "{0} Cores ({1} Threads)" -f $Vitals.CpuCores, $Vitals.CpuThreads
+    } else {
+      "{0} Cores" -f $Vitals.CpuCores
+    }
+  } else { '' }
+  $cpuSpeed = if($Vitals.CpuClockGHz -gt 0) { " @ {0:0.0} GHz" -f $Vitals.CpuClockGHz } else { '' }
+  $upInfo = if($Vitals.Uptime) { "  Up: {0}" -f $Vitals.Uptime } else { '' }
+
+  $cpuDetails = "  $cpuCoreInfo$cpuSpeed$upInfo"
+  $rows.Add(@{
+    Plain = "CPU   " + $cpuGaugePlain + $cpuDetails
+    Text  = (Paint "CPU   " 'CyanB') + $cpuGauge + (Paint $cpuDetails 'Gray')
+  })
+
+  # 2. RAM row
+  $memGauge = Get-ResourceGauge -Percent $Vitals.MemUsagePct -Width 10 -Warning $memWarn -Critical $memCrit
+  $memGaugePlain = "[{0}] {1,3:0}%" -f ('█' * 10), $Vitals.MemUsagePct
+  $memDetails = "  {0:0.0} / {1:0.0} GB ({2:0.0} GB free)" -f $Vitals.UsedMemGB, $Vitals.TotalMemGB, $Vitals.FreeMemGB
+  $rows.Add(@{
+    Plain = "RAM   " + $memGaugePlain + $memDetails
+    Text  = (Paint "RAM   " 'CyanB') + $memGauge + (Paint $memDetails 'Gray')
+  })
+
+  # 3. DISK rows (show up to 3 drives)
+  if($Vitals.Disks -and $Vitals.Disks.Count -gt 0)
+  {
+    $firstDisk = $true
+    foreach($d in ($Vitals.Disks | Select-Object -First 3))
+    {
+      $dGauge = Get-ResourceGauge -Percent $d.UsagePct -Width 8 -Warning $diskWarn -Critical $diskCrit
+      $dGaugePlain = "[{0}] {1,3:0}%" -f ('█' * 8), $d.UsagePct
+      $badgePlain = if($d.UsagePct -ge $diskCrit) { '  ▲ CRIT' } elseif($d.UsagePct -ge $diskWarn) { '  ▲ WARN' } else { '' }
+      $badgeText = if($d.UsagePct -ge $diskCrit) { Paint '  ▲ CRIT' 'RedB' } elseif($d.UsagePct -ge $diskWarn) { Paint '  ▲ WARN' 'Yellow' } else { '' }
+      
+      $dDrive = "{0,-3}" -f $d.Drive
+      $dDetails = " {0:0.0} GB free / {1:0.0} GB" -f $d.FreeGB, $d.TotalGB
+      
+      $prefixPlain = if($firstDisk) { "DISK  " } else { "      " }
+      $prefixText  = if($firstDisk) { Paint "DISK  " 'CyanB' } else { "      " }
+      
+      $rows.Add(@{
+        Plain = $prefixPlain + $dDrive + $dGaugePlain + $dDetails + $badgePlain
+        Text  = $prefixText + (Paint $dDrive 'White') + $dGauge + (Paint $dDetails 'Gray') + $badgeText
+      })
+      $firstDisk = $false
+    }
+  }
+
+  # 4. NET row
+  if($Vitals.NetDesc -or $Vitals.NetIP)
+  {
+    $netStr = if($Vitals.NetIP -and $Vitals.NetIP -ne 'No IPv4') {
+      "{0} ({1})" -f $Vitals.NetDesc, $Vitals.NetIP
+    } else {
+      [string]$Vitals.NetDesc
+    }
+    $rows.Add(@{
+      Plain = "NET   " + $netStr
+      Text  = (Paint "NET   " 'CyanB') + (Paint $netStr 'Gray')
+    })
+  }
+
+  # 5. OS row
+  if($Vitals.OSCaption)
+  {
+    $osStr = [string]$Vitals.OSCaption
+    $rebootStr = if($Vitals.RebootPending) { '  [REBOOT PENDING]' } else { '' }
+    $rebootText = if($rebootStr) { Paint $rebootStr 'Yellow' } else { '' }
+    $rows.Add(@{
+      Plain = "OS    " + $osStr + $rebootStr
+      Text  = (Paint "OS    " 'CyanB') + (Paint $osStr 'Gray') + $rebootText
+    })
+  }
+
+  # Calculate inner width matching available console space up to Get-CardWidth
+  $maxPlain = 0
+  foreach($r in $rows) { if($r.Plain.Length -gt $maxPlain) { $maxPlain = $r.Plain.Length } }
+
+  $gutterLen = $script:Gutter.Length
+  $padLen = 2 * $script:BoxPad.Length
+  $maxSpan = [math]::Max(50, (Get-CardWidth) - $gutterLen)
+  $span = [math]::Min($maxSpan, [math]::Max($maxPlain + $padLen, 68))
+  $innerWidth = $span - $padLen
+
+  $title = "─ $Server Vitals "
+  $dashCount = [math]::Max(2, $span - $title.Length)
+  $topBorder = '┌' + $title + ('─' * $dashCount) + '┐'
+  $botBorder = '└' + ('─' * $span) + '┘'
+
+  Write-Host ''
+  Write-Host ($script:Gutter + (Paint $topBorder 'Gray'))
+  foreach($r in $rows)
+  {
+    $plainLen = $r.Plain.Length
+    $visibleText = $r.Text
+    if($plainLen -gt $innerWidth)
+    {
+      # Line exceeds inner box width: trim plain equivalent to avoid wrap
+      $diff = $plainLen - $innerWidth
+      $pad = ''
+    }
+    else
+    {
+      $pad = ' ' * ($innerWidth - $plainLen)
+    }
+    Write-Host ($script:Gutter + (Paint '│' 'Gray') + $script:BoxPad + $visibleText + $pad + $script:BoxPad + (Paint '│' 'Gray'))
+  }
+  Write-Host ($script:Gutter + (Paint $botBorder 'Gray'))
 }
 
 function Write-SectionTitle

@@ -53,7 +53,8 @@ param(
     [int]         $TimeoutSeconds = 180,
     [switch]      $PassThru,
     [switch]      $NoColor,
-    [switch]      $NoElevate
+    [switch]      $NoElevate,
+    [switch]      $Vitals
 )
 
 $ErrorActionPreference = 'Stop'
@@ -81,6 +82,7 @@ if(-not $IsAdmin -and -not $NoElevate)
     if($OutputPath) { $relaunch += '-OutputPath'; $relaunch += ('"{0}"' -f $OutputPath) }
     if($PSBoundParameters.ContainsKey('TimeoutSeconds')) { $relaunch += '-TimeoutSeconds'; $relaunch += $TimeoutSeconds }
     if($NoColor)    { $relaunch += '-NoColor' }
+    if($Vitals)     { $relaunch += '-Vitals' }
     try
     { Write-Host 'Requesting administrator elevation (a new window will open)...' -ForegroundColor Yellow
       Start-Process -FilePath $hostExe -ArgumentList $relaunch -Verb RunAs | Out-Null
@@ -418,6 +420,16 @@ $runWatch.Stop()
 Write-SectionTitle 'Health summary'
 Show-SummaryTable -Results ([object[]]$results)
 Show-RunSummary -Results ([object[]]$results) -Elapsed ($runWatch.Elapsed.TotalSeconds)
+
+#--- Host vitals card (modular dashboard box) --------------------------------
+$showVitals = $Vitals -or ($results.Count -eq 1)
+foreach($res in $results)
+{
+  if($res.Vitals -and ($showVitals -or $res.All_Good -ne 'Yes'))
+  {
+    Show-HostVitalsCard -Server ([string]$res.Server) -Vitals $res.Vitals -Thresholds $Config.Thresholds
+  }
+}
 
 #--- Export summary CSV (driven off the real properties) ----------------------
 # CSV only: the summary is already on screen and the per-server reports carry the detail,
