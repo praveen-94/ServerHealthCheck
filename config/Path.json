@@ -4,5 +4,6 @@
     "helperModulePath": ".\\helper_modules",
     "InputCSVPath": ".\\config\\Inputs.csv",
     "CoreScriptsPath": ".\\core_scripts\\HealthCheck.ps1",
-    "HTMLTemplatePath": ".\\config\\ReportTemplate.html"
+    "HTMLTemplatePath": ".\\config\\ReportTemplate.html",
+    "ThresholdsConfigPath": ".\\config\\Thresholds.json"
 }

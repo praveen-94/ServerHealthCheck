@@ -531,6 +531,8 @@
             <button type='button' data-tab='tab-applications' data-icon='apps'><span class='nav-label'>Applications</span></button>
             <button type='button' data-tab='tab-updates' data-icon='upd'><span class='nav-label'>Updates</span></button>
             <button type='button' data-tab='tab-eventlogs' data-icon='evt'><span class='nav-label'>Event Logs</span></button>
+            <button type='button' data-tab='tab-network' data-icon='net'><span class='nav-label'>Network</span></button>
+            <button type='button' data-tab='tab-security' data-icon='sec'><span class='nav-label'>Security</span></button>
         </nav>
 
         <div class='sidebar-foot'>
@@ -598,6 +600,26 @@
             <summary>Printer</summary>
             <!-- Hardware_Printer -->
         </details>
+        <details>
+            <summary>Pagefile</summary>
+            <!-- Hardware_Pagefile -->
+        </details>
+        <details>
+            <summary>Power Plan</summary>
+            <!-- Hardware_PowerPlan -->
+        </details>
+        <details>
+            <summary>Physical Disk Drives</summary>
+            <!-- Hardware_DiskDrive -->
+        </details>
+        <details>
+            <summary>Volume Shadow Copies</summary>
+            <!-- Hardware_VSS -->
+        </details>
+        <details>
+            <summary>Top Processes (by Memory)</summary>
+            <!-- Hardware_TopProcesses -->
+        </details>
     </section>
 
     <section id='tab-os' class='tab'>
@@ -617,6 +639,14 @@
         <details>
             <summary>ScheduleTask</summary>
             <!-- OS_ScheduleTask -->
+        </details>
+        <details>
+            <summary>Pending Reboot / Uptime</summary>
+            <!-- OS_PendingReboot -->
+        </details>
+        <details>
+            <summary>NTP / Time Sync</summary>
+            <!-- OS_NTPTimeSync -->
         </details>
     </section>
 
@@ -696,6 +726,38 @@
         </details>
     </section>
 
+    <section id='tab-network' class='tab'>
+        <h2>Network Details</h2>
+        <details>
+            <summary>Network Adapters</summary>
+            <!-- Network_Adapters -->
+        </details>
+    </section>
+
+    <section id='tab-security' class='tab'>
+        <h2>Security Details</h2>
+        <details>
+            <summary>Firewall Profiles</summary>
+            <!-- Security_Firewall -->
+        </details>
+        <details>
+            <summary>Certificates Expiring (30 Days)</summary>
+            <!-- Security_Certificates -->
+        </details>
+        <details>
+            <summary>Antivirus Status</summary>
+            <!-- Security_Antivirus -->
+        </details>
+        <details>
+            <summary>BitLocker Encryption</summary>
+            <!-- Security_BitLocker -->
+        </details>
+        <details>
+            <summary>Secure Boot</summary>
+            <!-- Security_SecureBoot -->
+        </details>
+    </section>
+
     <hr class='separator'>
     <footer class='report-footer'>
         <span>ServerVitals health report</span>
@@ -729,7 +791,9 @@
         users: ['<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>', '<circle cx="9" cy="7" r="4"/>', '<path d="M22 21v-2a4 4 0 0 0-3-3.87"/>'],
         apps:  ['<path d="m7.5 4.27 9 5.15"/>', '<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/>', '<path d="m3.3 7 8.7 5 8.7-5"/>', '<path d="M12 22V12"/>'],
         upd:   ['<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>', '<path d="M21 3v5h-5"/>', '<path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>', '<path d="M8 16H3v5"/>'],
-        dash:  ['<rect width="7" height="9" x="3" y="3" rx="1"/>', '<rect width="7" height="5" x="14" y="3" rx="1"/>', '<rect width="7" height="9" x="14" y="12" rx="1"/>', '<rect width="7" height="5" x="3" y="16" rx="1"/>']
+        dash:  ['<rect width="7" height="9" x="3" y="3" rx="1"/>', '<rect width="7" height="5" x="14" y="3" rx="1"/>', '<rect width="7" height="9" x="14" y="12" rx="1"/>', '<rect width="7" height="5" x="3" y="16" rx="1"/>'],
+        net:   ['<path d="M5 12.55a11 11 0 0 1 14.08 0"/>', '<path d="M1.42 9a16 16 0 0 1 21.16 0"/>', '<path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>', '<path d="M12 20h.01"/>'],
+        sec:   ['<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>', '<path d="M7 11V7a5 5 0 0 1 10 0v4"/>']
     };
 
     function icon(name, cls) {
@@ -799,9 +863,17 @@
         return null;
     }
 
-    function severityFor(pct) {
-        if (pct >= 90) { return 'crit'; }
-        if (pct >= 70) { return 'warn'; }
+    var THRESHOLDS = /* THRESHOLDS_JSON */ || { diskWarn: 70, diskCrit: 90 };
+
+    function severityFor(pct, metricType) {
+        var warn = 70, crit = 90;
+        if (metricType === 'disk') { warn = THRESHOLDS.diskWarn || 70; crit = THRESHOLDS.diskCrit || 90; }
+        else if (metricType === 'mem') { warn = THRESHOLDS.memWarn || 70; crit = THRESHOLDS.memCrit || 90; }
+        else if (metricType === 'cpu') { warn = THRESHOLDS.cpuWarn || 70; crit = THRESHOLDS.cpuCrit || 90; }
+        else if (metricType === 'page') { warn = THRESHOLDS.pageWarn || 70; crit = THRESHOLDS.pageCrit || 90; }
+        else if (THRESHOLDS.diskWarn && THRESHOLDS.diskCrit) { warn = THRESHOLDS.diskWarn; crit = THRESHOLDS.diskCrit; }
+        if (pct >= crit) { return 'crit'; }
+        if (pct >= warn) { return 'warn'; }
         return 'ok';
     }
 
@@ -846,7 +918,7 @@
     /* -- 3. colour + meter the metric columns ----------------------------
        Matched by HEADER NAME, never position: a table that gains a column, or a
        check that renders a banner instead of a table, must not break this.  */
-    var PERCENT_COLUMNS = ['LoadPercentage', 'MemoryUsage(%)', 'DiskUsage(%)'];
+    var PERCENT_COLUMNS = ['LoadPercentage', 'MemoryUsage(%)', 'DiskUsage(%)', 'PagefileUsage(%)'];
 
     function decorateMetrics() {
         var tables = Array.prototype.slice.call(document.getElementsByTagName('table'));
@@ -857,9 +929,8 @@
                 dataRows(t).forEach(function (row) {
                     var cell = row.cells[col];
                     if (!cell) { return; }
-                    var pct = num(text(cell));
-                    if (isNaN(pct)) { return; }
-                    var sev = severityFor(pct);
+                    var mType = (h === 'MemoryUsage(%)' ? 'mem' : (h === 'LoadPercentage' ? 'cpu' : (h === 'PagefileUsage(%)' ? 'page' : 'disk')));
+                    var sev = severityFor(pct, mType);
                     cell.innerHTML =
                         '<div class="usage-cell">' +
                           '<div class="progress" role="img" aria-label="' + pct + ' percent">' +
@@ -916,6 +987,7 @@
         var f = { disk: null, disks: [], memory: null, cpu: null, os: null, bios: null,
                   servicesDown: 0, servicesUp: 0,
                   errors: 0, apps: 0, updatesOk: 0, updatesBad: 0, localUsers: 0, admins: 0,
+                  netAdapters: 0, secIssues: 0,
                   /* Per-log tallies as well as the total, so the section badge can mark
                      the log the errors came from. Keyed by summary text. */
                   errorsByLog: {}, eventDays: {} };
@@ -1044,6 +1116,28 @@
             });
         });
 
+        var netTable = tableInSection('Network Adapters');
+        if (netTable) { f.netAdapters = dataRows(netTable).length; }
+
+        var fwTable = tableInSection('Firewall Profiles');
+        if (fwTable) {
+            dataRows(fwTable).forEach(function (row) {
+                var enabled = columnIndex(fwTable, 'Enabled');
+                if (enabled !== -1 && text(row.cells[enabled]) === 'False') { f.secIssues++; }
+            });
+        }
+        var certTable = tableInSection('Certificates Expiring (30 Days)');
+        if (certTable) { f.secIssues += dataRows(certTable).length; }
+
+        var rebootTable = tableInSection('Pending Reboot / Uptime');
+        if (rebootTable) {
+            var rCol = columnIndex(rebootTable, 'Reboot Required');
+            if (rCol !== -1) {
+                var rRow = dataRows(rebootTable)[0];
+                if (rRow && text(rRow.cells[rCol]) === 'Yes') { f.secIssues++; }
+            }
+        }
+
         return f;
     }
 
@@ -1061,9 +1155,9 @@
             }
             return s;
         }
-        var hwSev = worst(f.disk ? severityFor(f.disk.pct) : 'ok',
-                          f.memory ? severityFor(f.memory.pct) : 'ok',
-                          f.cpu ? severityFor(f.cpu.pct) : 'ok');
+        var hwSev = worst(f.disk ? severityFor(f.disk.pct, 'disk') : 'ok',
+                          f.memory ? severityFor(f.memory.pct, 'mem') : 'ok',
+                          f.cpu ? severityFor(f.cpu.pct, 'cpu') : 'ok');
         var hwNotes = [];
         if (f.disk)   { hwNotes.push(f.disk.name + ' at ' + f.disk.pct.toFixed(0) + '%'); }
         if (f.memory) { hwNotes.push('memory at ' + f.memory.pct.toFixed(0) + '%'); }
@@ -1082,7 +1176,11 @@
             { tab: 'tab-updates', name: 'Updates', sev: f.updatesBad > 0 ? 'warn' : 'ok',
               note: f.updatesOk + ' succeeded, ' + f.updatesBad + ' failed' },
             { tab: 'tab-eventlogs', name: 'Events', sev: f.errors > 0 ? 'warn' : 'ok',
-              note: f.errors + (f.errors === 1 ? ' error logged' : ' errors logged') }
+              note: f.errors + (f.errors === 1 ? ' error logged' : ' errors logged') },
+            { tab: 'tab-network', name: 'Network', sev: f.netAdapters > 0 ? 'ok' : 'warn',
+              note: f.netAdapters > 0 ? (f.netAdapters + ' active adapters') : 'No network data' },
+            { tab: 'tab-security', name: 'Security', sev: f.secIssues > 0 ? 'warn' : 'ok',
+              note: f.secIssues > 0 ? (f.secIssues + ' items need attention') : 'No security issues' }
         ];
     }
 
@@ -1090,21 +1188,21 @@
     function issuesFrom(f) {
         var out = [];
         f.disks.forEach(function (d) {
-            var sev = severityFor(d.pct);
+            var sev = severityFor(d.pct, 'disk');
             if (sev === 'ok') { return; }
             out.push({ sev: sev, tab: 'tab-hardware',
                        title: d.name + ' drive is ' + (sev === 'crit' ? 'nearly full' : 'filling up'),
                        note: d.free ? (d.free + ' GB free of ' + d.total + ' GB') : '',
                        value: d.pct.toFixed(1) + '%' });
         });
-        if (f.memory && severityFor(f.memory.pct) !== 'ok') {
-            out.push({ sev: severityFor(f.memory.pct), tab: 'tab-hardware',
+        if (f.memory && severityFor(f.memory.pct, 'mem') !== 'ok') {
+            out.push({ sev: severityFor(f.memory.pct, 'mem'), tab: 'tab-hardware',
                        title: 'Memory is under pressure',
                        note: f.memory.free ? (f.memory.free + ' GB free of ' + f.memory.total + ' GB') : '',
                        value: f.memory.pct.toFixed(1) + '%' });
         }
-        if (f.cpu && severityFor(f.cpu.pct) !== 'ok') {
-            out.push({ sev: severityFor(f.cpu.pct), tab: 'tab-hardware',
+        if (f.cpu && severityFor(f.cpu.pct, 'cpu') !== 'ok') {
+            out.push({ sev: severityFor(f.cpu.pct, 'cpu'), tab: 'tab-hardware',
                        title: 'CPU load is high', note: 'Reading taken at scan time',
                        value: f.cpu.pct.toFixed(0) + '%' });
         }
@@ -1138,8 +1236,8 @@
                  '<span class="progress-tick" style="left:90%"></span>' +
                '</div>';
     }
-    function metricRow(name, sub, pct) {
-        var sev = severityFor(pct);
+    function metricRow(name, sub, pct, metricType) {
+        var sev = severityFor(pct, metricType);
         /* name/sub carry DeviceID and VolumeName, both set on the scanned host. */
         return '<div class="metric">' +
                  '<div class="metric-head">' +
@@ -1191,10 +1289,10 @@
 
         /* --- resources: every drive, then memory and CPU --- */
         var rows = f.disks.map(function (d) {
-            return metricRow(d.name + ' drive', d.volume || '', d.pct);
+            return metricRow(d.name + ' drive', d.volume || '', d.pct, 'disk');
         });
-        if (f.memory) { rows.push(metricRow('Memory', f.memory.total ? f.memory.total + ' GB total' : '', f.memory.pct)); }
-        if (f.cpu)    { rows.push(metricRow('CPU load', f.cpu.cores ? f.cpu.cores + ' cores / ' + f.cpu.threads + ' threads' : '', f.cpu.pct)); }
+        if (f.memory) { rows.push(metricRow('Memory', f.memory.total ? f.memory.total + ' GB total' : '', f.memory.pct, 'mem')); }
+        if (f.cpu)    { rows.push(metricRow('CPU load', f.cpu.cores ? f.cpu.cores + ' cores / ' + f.cpu.threads + ' threads' : '', f.cpu.pct, 'cpu')); }
         document.getElementById('dash-resources').innerHTML =
             cardShell('Resources', 'Ticks mark the 70% and 90% thresholds',
                       rows.length ? rows.join('') : '<p class="card-desc">No resource readings were returned.</p>');
@@ -1305,11 +1403,11 @@
         }
 
         if (f.disk) {
-            var ds = severityFor(f.disk.pct);
+            var ds = severityFor(f.disk.pct, 'disk');
             if (ds !== 'ok') { tag('Disk', ds, f.disk.name + ' at ' + f.disk.pct.toFixed(0) + '%', true); }
         }
         if (f.memory) {
-            var ms = severityFor(f.memory.pct);
+            var ms = severityFor(f.memory.pct, 'mem');
             if (ms !== 'ok') { tag('Memory', ms, f.memory.pct.toFixed(0) + '% used', true); }
         }
         if (f.servicesDown > 0) {

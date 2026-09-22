@@ -1,0 +1,22 @@
+{
+    "DiskUsageWarningPercent": 70,
+    "DiskUsageCriticalPercent": 90,
+    "MemoryUsageWarningPercent": 70,
+    "MemoryUsageCriticalPercent": 90,
+    "CpuUsageWarningPercent": 70,
+    "CpuUsageCriticalPercent": 90,
+    "PagefileUsageWarningPercent": 70,
+    "PagefileUsageCriticalPercent": 90,
+    "UptimeWarningDays": 90,
+    "CertExpiryWarningDays": 30,
+    "IgnoredServices": [
+        "gupdate",
+        "gupdatem",
+        "edgeupdate",
+        "edgeupdatem",
+        "MapsBroker",
+        "sppsvc",
+        "RemoteRegistry",
+        "TrustedInstaller"
+    ]
+}

@@ -13,9 +13,9 @@ Metrics are gathered over a single **CIM session per host using DCOM**, which mi
 
 ## Features
 - Scan one or more hosts by name/IP, or import a server list from CSV
-- ~20 metric groups per host: OS, hardware, disks, memory, CPU, local users and groups, services, scheduled tasks, installed applications, Windows Update history, printers and event logs
+- ~34 metrics across 9 check groups per host: OS, hardware, disks, memory, CPU, local users and groups, services, installed applications, Windows Update history, event logs, network adapters, and security (BitLocker, Defender, Firewall, Certificates, Secure Boot)
 - Live terminal dashboard: per-host progress bar, per-check status strip, and a colour-coded summary table
-- Detailed HTML report per server, plus a summary CSV
+- Detailed HTML report per server, plus summary CSV and JSON exports
 - Per-host timeout so one unresponsive machine can't stall the run
 - Remote scanning with alternate credentials
 - Auto-elevation via UAC (elevated runs see more event-log and account detail)
@@ -115,6 +115,7 @@ All paths live in `config/Path.json` and are resolved to absolute at startup, so
 | `InputCSVPath` | Default server-list CSV |
 | `CoreScriptsPath` | The health-check script |
 | `HTMLTemplatePath` | The report template |
+| `ThresholdsConfigPath` | Warning and critical threshold definitions and ignored services |
 
 Every key is optional and falls back to a built-in default; substituted keys are reported on a warning line at startup.
 
@@ -128,6 +129,7 @@ Written under `logs/Outputs/` (or `-OutputPath`):
 |---|---|
 | Per-server HTML report | `ServerReports/HealthCheckReport_<ServerName>.html` |
 | Summary CSV | `ServerHealthReport.csv` |
+| Summary JSON | `ServerHealthReport.json` |
 | Log | `serverVital.log` |
 
 Errors are written to the same log tagged `[ERROR]`:
@@ -147,7 +149,8 @@ ServerHealthCheck/
 ├── config/
 │   ├── Inputs.csv             # default server list (Server column)
 │   ├── Path.json              # all configurable paths
-│   └── ReportTemplate.html    # per-server HTML report template
+│   ├── ReportTemplate.html    # per-server HTML report template
+│   └── Thresholds.json        # resource thresholds & ignored services
 ├── core_scripts/
 │   └── HealthCheck.ps1        # the health check itself (Get-ServerHealth)
 ├── helper_modules/

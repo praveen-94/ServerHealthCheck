@@ -154,6 +154,14 @@ if($OutputPath) { Set-ConfigValue $Config 'logPath' $OutputPath }
 # One version string for banner + HTML report, threaded down so the two can't drift.
 Set-ConfigValue $Config 'ReportVersion' (Get-AppVersion)
 
+# Load Thresholds configuration if available
+$ThresholdsConfigPath = Get-ConfigValue $Config 'ThresholdsConfigPath'
+if([string]::IsNullOrWhiteSpace($ThresholdsConfigPath)) { $ThresholdsConfigPath = Resolve-ConfigPath '.\config\Thresholds.json' }
+if(Test-Path -LiteralPath $ThresholdsConfigPath)
+{ try { $ThresholdsObj = Get-Content -LiteralPath $ThresholdsConfigPath -Raw | ConvertFrom-Json
+        Set-ConfigValue $Config 'Thresholds' $ThresholdsObj } catch { }
+}
+
 # No default can stand in for these: fail here, named, not deep inside a runspace.
 foreach($required in @(@{ Key = 'CoreScriptsPath';  What = 'health-check script' },
                        @{ Key = 'HTMLTemplatePath'; What = 'HTML report template' }))
@@ -371,7 +379,8 @@ foreach($server in $Servers)
     $obj = [pscustomobject]@{
         Server = $server; Status = $status
         HardWare_Check = 'N/A'; OS_Check = 'N/A'; Users_Check = 'N/A'; Service_Check = 'N/A'
-        Application_Check = 'N/A'; Update_Check = 'N/A'; EventLog_Check = 'N/A'; All_Good = 'No'
+        Application_Check = 'N/A'; Update_Check = 'N/A'; EventLog_Check = 'N/A'
+        Network_Check = 'N/A'; Security_Check = 'N/A'; All_Good = 'No'
     }
   }
   $results.Add($obj)
@@ -424,25 +433,29 @@ function ConvertTo-PlainMark([object]$Value)
   return $text
 }
 
+# Build clean plain-word result projections for both CSV and JSON exports
+$plainResults = @($results |
+    Select-Object -Property @(
+        'Server', 'Status'
+        @{ Name = 'HardWare_Check';    Expression = { ConvertTo-PlainMark $_.HardWare_Check } }
+        @{ Name = 'OS_Check';          Expression = { ConvertTo-PlainMark $_.OS_Check } }
+        @{ Name = 'Users_Check';       Expression = { ConvertTo-PlainMark $_.Users_Check } }
+        @{ Name = 'Service_Check';     Expression = { ConvertTo-PlainMark $_.Service_Check } }
+        @{ Name = 'Application_Check'; Expression = { ConvertTo-PlainMark $_.Application_Check } }
+        @{ Name = 'Update_Check';      Expression = { ConvertTo-PlainMark $_.Update_Check } }
+        @{ Name = 'EventLog_Check';    Expression = { ConvertTo-PlainMark $_.EventLog_Check } }
+        @{ Name = 'Network_Check';     Expression = { ConvertTo-PlainMark $_.Network_Check } }
+        @{ Name = 'Security_Check';    Expression = { ConvertTo-PlainMark $_.Security_Check } }
+        'All_Good'
+    ))
+
 try
 { # ConvertTo-Csv + WriteAllLines, not Export-Csv: "Export-Csv -Encoding UTF8" writes a BOM
   # on Windows PowerShell 5.1 and NO BOM on PowerShell 7, so the same run produced two
   # different files depending on which shell launched it. Excel guesses ANSI for a BOM-less
   # UTF-8 file, which mangles any non-ASCII host name. Same explicit encoding as the HTML
   # report, so both are written identically on both editions.
-  $csvLines = $results |
-      Select-Object -Property @(
-          'Server', 'Status'
-          @{ Name = 'HardWare_Check';    Expression = { ConvertTo-PlainMark $_.HardWare_Check } }
-          @{ Name = 'OS_Check';          Expression = { ConvertTo-PlainMark $_.OS_Check } }
-          @{ Name = 'Users_Check';       Expression = { ConvertTo-PlainMark $_.Users_Check } }
-          @{ Name = 'Service_Check';     Expression = { ConvertTo-PlainMark $_.Service_Check } }
-          @{ Name = 'Application_Check'; Expression = { ConvertTo-PlainMark $_.Application_Check } }
-          @{ Name = 'Update_Check';      Expression = { ConvertTo-PlainMark $_.Update_Check } }
-          @{ Name = 'EventLog_Check';    Expression = { ConvertTo-PlainMark $_.EventLog_Check } }
-          'All_Good'
-      ) |
-      ConvertTo-Csv -NoTypeInformation
+  $csvLines = $plainResults | ConvertTo-Csv -NoTypeInformation
   [System.IO.File]::WriteAllLines($csvPath, [string[]]$csvLines, (New-Object System.Text.UTF8Encoding($true)))
   # File only: the full path wraps over several lines. The Reports section below shows
   # the folder once, with the file names under it.
@@ -455,13 +468,28 @@ catch
   $csvWritten = $false
 }
 
+#--- Export summary JSON ------------------------------------------------------
+$jsonPath = Join-Path $Config.logPath 'ServerHealthReport.json'
+try
+{ $rawJson = $plainResults | ConvertTo-Json -Depth 5
+  $jsonText = if($plainResults.Count -eq 1) { "[`n" + $rawJson + "`n]" } else { $rawJson }
+  [System.IO.File]::WriteAllText($jsonPath, $jsonText, (New-Object System.Text.UTF8Encoding($true)))
+  Write-Log -Message "Summary JSON exported to $jsonPath" -Level 'SUCCESS' -LogPath $LogHCU -NoConsole
+  $jsonWritten = $true
+}
+catch
+{ Write-Log -Message "Failed to export summary JSON: $_" -Level 'ERROR' -LogPath $LogHCU -NoConsole
+  $jsonWritten = $false
+}
+
 #--- Footer -------------------------------------------------------------------
 $online = @($results | Where-Object { $_.Status -eq 'Online' }).Count
 Write-SectionTitle 'Reports'
 $pad = '   '   # column 3, matching every other content line (see console_ui.psm1)
 Write-Host ($pad + (Paint 'Folder    ' 'Gray') + (Paint $Config.logPath 'White'))
-if($csvWritten) { Write-Host ($pad + (Paint 'Summary   ' 'Gray') + (Paint (Split-Path -Leaf $csvPath) 'White')) }
-else            { Write-Host ($pad + (Paint 'Summary   ' 'Gray') + (Paint 'not written - see the log for the reason' 'Red')) }
+if($csvWritten) { Write-Host ($pad + (Paint 'CSV       ' 'Gray') + (Paint (Split-Path -Leaf $csvPath) 'White')) }
+else            { Write-Host ($pad + (Paint 'CSV       ' 'Gray') + (Paint 'not written - see the log for the reason' 'Red')) }
+if($jsonWritten){ Write-Host ($pad + (Paint 'JSON      ' 'Gray') + (Paint (Split-Path -Leaf $jsonPath) 'White')) }
 Write-Host ($pad + (Paint 'Log       ' 'Gray') + (Paint (Split-Path -Leaf $LogHCU) 'White'))
 # Only advertise reports that exist: offline / timed-out hosts never reach the writing
 # stage, so an all-unreachable run pointed at an empty folder and a pattern matching nothing.

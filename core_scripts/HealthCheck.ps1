@@ -121,6 +121,13 @@ function Get-ServerHealth
           return [string]$Value
       }
 
+      $HKLM = [uint32]2147483650   # HKEY_LOCAL_MACHINE - decimal, or 5.1 wraps the hex literal negative
+      # Read one REG_SZ value from a subkey over the CIM session.
+      $GetRegStr = { param($KeyPath, $ValueName)
+          (Invoke-CimMethod -CimSession $CimSession -Namespace 'root\cimv2' -ClassName StdRegProv -MethodName GetStringValue `
+              -Arguments @{ hDefKey = $HKLM; sSubKeyName = $KeyPath; sValueName = $ValueName } -ErrorAction Stop).sValue
+      }
+
       # -Encoding UTF8 is required: the template has no BOM and contains non-ASCII, which 5.1
       # would otherwise decode as ANSI and bake into every report as mojibake. Guarded on its
       # own because this sits above every check - a missing or locked template used to fall
@@ -181,7 +188,52 @@ function Get-ServerHealth
       catch
       { Write-Log -Message "Failed to fetch Schedule task details: $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU
       }
-      & $Mark 'OS' $OSCheck 4
+
+      #Pending Reboot and Uptime Status
+      try
+      { $RebootPending = $false
+        $RebootReasons = @()
+        $cbsResult = Invoke-CimMethod -CimSession $CimSession -Namespace 'root\cimv2' -ClassName StdRegProv -MethodName EnumKey `
+            -Arguments @{ hDefKey = $HKLM; sSubKeyName = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending' } -ErrorAction Stop
+        if($cbsResult.ReturnValue -eq 0) { $RebootPending = $true; $RebootReasons += 'Component Based Servicing' }
+        $wuRebootResult = Invoke-CimMethod -CimSession $CimSession -Namespace 'root\cimv2' -ClassName StdRegProv -MethodName EnumKey `
+            -Arguments @{ hDefKey = $HKLM; sSubKeyName = 'SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired' } -ErrorAction Stop
+        if($wuRebootResult.ReturnValue -eq 0) { $RebootPending = $true; $RebootReasons += 'Windows Update' }
+        $pfrResult = Invoke-CimMethod -CimSession $CimSession -Namespace 'root\cimv2' -ClassName StdRegProv -MethodName GetMultiStringValue `
+            -Arguments @{ hDefKey = $HKLM; sSubKeyName = 'SYSTEM\CurrentControlSet\Control\Session Manager'; sValueName = 'PendingFileRenameOperations' } -ErrorAction Stop
+        if($pfrResult.ReturnValue -eq 0 -and $pfrResult.sValue -and $pfrResult.sValue.Count -gt 0) { $RebootPending = $true; $RebootReasons += 'Pending File Rename' }
+        $UptimeDays = if($OSDetails -and $OSDetails.LastBootUpTime) { [math]::Floor(((Get-Date) - $OSDetails.LastBootUpTime).TotalDays) } else { 'Unknown' }
+        $UptimeWarnDays = if($PathFiles -and $PathFiles.Thresholds -and $PathFiles.Thresholds.UptimeWarningDays) { [int]$PathFiles.Thresholds.UptimeWarningDays } else { 90 }
+        $UptimeWarning = if($UptimeDays -is [int] -and $UptimeDays -gt $UptimeWarnDays) { "Yes (>$UptimeWarnDays days)" } else { 'No' }
+        $RebootInfo = [PSCustomObject]@{
+            'Reboot Required' = if($RebootPending) { 'Yes' } else { 'No' }
+            'Reason' = if($RebootReasons.Count -gt 0) { $RebootReasons -join ', ' } else { 'None' }
+            'Uptime (Days)' = $UptimeDays
+            'Uptime Warning' = $UptimeWarning
+        } | ConvertTo-Html -Fragment
+        $OSCheck++
+      }
+      catch
+      { Write-Log -Message "Failed to check pending reboot status: $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU
+      }
+
+      #NTP / Time Synchronization
+      try
+      { $W32TimeSvc = Get-CimInstance -ClassName Win32_Service -Filter "Name='W32Time'" -CimSession $CimSession -ErrorAction Stop
+        $NtpServer = & $GetRegStr 'SYSTEM\CurrentControlSet\Services\W32Time\Parameters' 'NtpServer'
+        $W32TimeType = & $GetRegStr 'SYSTEM\CurrentControlSet\Services\W32Time\Parameters' 'Type'
+        $TimeSyncInfo = [PSCustomObject]@{
+            'W32Time Service' = $W32TimeSvc.State
+            'Start Mode' = $W32TimeSvc.StartMode
+            'Sync Type' = if($W32TimeType) { $W32TimeType } else { 'Not configured' }
+            'NTP Server' = if($NtpServer) { $NtpServer } else { 'Not configured' }
+        } | ConvertTo-Html -Fragment
+        $OSCheck++
+      }
+      catch
+      { Write-Log -Message "Failed to fetch NTP/Time sync details: $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU
+      }
+      & $Mark 'OS' $OSCheck 6
 
       #Hardware Data............................................................................................................................................................................
       #BIOS Data
@@ -203,7 +255,8 @@ function Get-ServerHealth
         $HardWareCheck++
       }
       catch
-      { Write-Log -Message "Failed to fetch Battery details: $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU
+      { $BatteryInfo = $null
+        $HardWareCheck++   # No battery on a server/desktop is normal; do not fail hardware group
       }
 
       #Get CPU Usage
@@ -258,7 +311,77 @@ function Get-ServerHealth
       catch
       { Write-Log -Message "Failed to fetch Printer details: $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU
       }
-      & $Mark 'HW' $HardWareCheck 6
+
+      #Pagefile Usage
+      try
+      { $PagefileDetails = Get-CimInstance -ClassName Win32_PageFileUsage -CimSession $CimSession -ErrorAction Stop
+        $PagefileInfo = $PagefileDetails | Select-Object -Property Name,
+            @{Name='AllocatedSize(MB)'; Expression={ $_.AllocatedBaseSize }},
+            @{Name='CurrentUsage(MB)'; Expression={ $_.CurrentUsage }},
+            @{Name='PeakUsage(MB)'; Expression={ $_.PeakUsage }},
+            @{Name='PagefileUsage(%)'; Expression={ if($_.AllocatedBaseSize -gt 0) { & $Num (($_.CurrentUsage / $_.AllocatedBaseSize) * 100) } else { 0 } }} | ConvertTo-Html -Fragment
+        $HardWareCheck++
+      }
+      catch
+      { Write-Log -Message "Failed to fetch pagefile details: $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU
+      }
+
+      #Active Power Plan
+      try
+      { $PowerPlanDetails = Get-CimInstance -Namespace 'root\cimv2\power' -ClassName Win32_PowerPlan -Filter "IsActive=True" -CimSession $CimSession -ErrorAction Stop
+        $PowerPlanInfo = $PowerPlanDetails | Select-Object -Property @{Name='Active Plan'; Expression={ $_.ElementName }},
+            @{Name='Instance ID'; Expression={ $_.InstanceID }},
+            @{Name='Is Active'; Expression={ $_.IsActive }} | ConvertTo-Html -Fragment
+        $HardWareCheck++
+      }
+      catch
+      { Write-Log -Message "Failed to fetch power plan details: $($_.Exception.Message)" -Level "WARNING" -LogPath $LogHCU
+        $PowerPlanInfo = $null
+        $HardWareCheck++   # Power plan permissions issue in remote session is non-fatal
+      }
+
+      #Physical Disk Drives
+      try
+      { $DiskDriveDetails = Get-CimInstance -ClassName Win32_DiskDrive -CimSession $CimSession -ErrorAction Stop
+        $DiskDriveInfo = $DiskDriveDetails | Select-Object -Property Model, InterfaceType, MediaType,
+            @{Name='Size(GB)'; Expression={ if($_.Size) { & $Num ($_.Size/1GB) } else { '0.00' } }},
+            Status, Partitions | ConvertTo-Html -Fragment
+        $HardWareCheck++
+      }
+      catch
+      { Write-Log -Message "Failed to fetch physical disk drive details: $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU
+      }
+
+      #Volume Shadow Copy (VSS)
+      try
+      { $VSSDetails = Get-CimInstance -ClassName Win32_ShadowCopy -CimSession $CimSession -ErrorAction Stop
+        if($VSSDetails)
+        { $VSSInfo = $VSSDetails | Select-Object -Property VolumeName, DeviceObject,
+              @{Name='InstallDate'; Expression={ if($_.InstallDate) { $_.InstallDate.ToString('yyyy-MM-dd HH:mm:ss') } else { '' } }},
+              State | ConvertTo-Html -Fragment
+        }
+        else
+        { $VSSInfo = $null }
+        $HardWareCheck++
+      }
+      catch
+      { Write-Log -Message "Failed to fetch VSS details: $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU
+      }
+
+      #Top 10 Processes by Memory
+      try
+      { $ProcessDetails = Get-CimInstance -ClassName Win32_Process -CimSession $CimSession -ErrorAction Stop
+        $TopProcessInfo = $ProcessDetails | Sort-Object WorkingSetSize -Descending | Select-Object -First 10 -Property Name, ProcessId,
+            @{Name='Memory(MB)'; Expression={ & $Num ($_.WorkingSetSize/1MB) }},
+            @{Name='PageFile(MB)'; Expression={ & $Num ($_.PageFileUsage/1KB) }},
+            @{Name='Threads'; Expression={ $_.ThreadCount }},
+            @{Name='Handles'; Expression={ $_.HandleCount }} | ConvertTo-Html -Fragment
+        $HardWareCheck++
+      }
+      catch
+      { Write-Log -Message "Failed to fetch top process details: $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU
+      }
+      & $Mark 'HW' $HardWareCheck 11
 
       #Users Data.................................................................................................................................................................................
       #Local Users
@@ -340,11 +463,15 @@ function Get-ServerHealth
         #Disabled Services
         $DService = $ServiceDetails | Where-Object { ($_.StartMode -eq "Disabled") } | Select-Object -Property DisplayName, Name, StartMode, State | ConvertTo-Html -Fragment
         $ServiceCheck++
+        # Flag as warning if automatic services are stopped (excluding ignored services)
+        $IgnoredServices = if($PathFiles -and $PathFiles.Thresholds -and $PathFiles.Thresholds.IgnoredServices) { $PathFiles.Thresholds.IgnoredServices } else { @() }
+        $StoppedAutoCount = @($ServiceDetails | Where-Object { ($_.State -eq 'Stopped') -and ($_.StartMode -eq 'Auto') -and ($IgnoredServices -notcontains $_.Name) }).Count
+        if($StoppedAutoCount -eq 0) { $ServiceCheck++ }
       }
       catch
       { Write-Log -Message "Failed to fetch Service details: $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU
       }
-      & $Mark 'SVC' $ServiceCheck 1
+      & $Mark 'SVC' $ServiceCheck 2
 
       #Applications Data............................................................................................................................................................................................................................................
       & $Stage 'APP'
@@ -354,16 +481,10 @@ function Get-ServerHealth
         # Win32_Product, which triggers an MSI consistency check on every enumerated product
         # (minutes per host) and only ever saw MSI installs. This is near-instant and covers
         # EXE installers too.
-        $HKLM = [uint32]2147483650   # HKEY_LOCAL_MACHINE - decimal, or 5.1 wraps the hex literal negative
         $UninstallPaths = @(
             'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
             'SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
         )
-        # Read one REG_SZ value from a subkey over the CIM session.
-        $GetRegStr = { param($KeyPath, $ValueName)
-            (Invoke-CimMethod -CimSession $CimSession -Namespace 'root\cimv2' -ClassName StdRegProv -MethodName GetStringValue `
-                -Arguments @{ hDefKey = $HKLM; sSubKeyName = $KeyPath; sValueName = $ValueName } -ErrorAction Stop).sValue
-        }
         $AppList = foreach($BasePath in $UninstallPaths)
         { $Enum = Invoke-CimMethod -CimSession $CimSession -Namespace 'root\cimv2' -ClassName StdRegProv -MethodName EnumKey `
               -Arguments @{ hDefKey = $HKLM; sSubKeyName = $BasePath } -ErrorAction Stop
@@ -516,6 +637,115 @@ function Get-ServerHealth
         }
       }
       & $Mark 'EVT' $EventLogCheck 2
+
+      #Network Data............................................................................................................................................................................................................................................
+      & $Stage 'NET'
+      $NetworkCheck = 0
+      #Network Adapter Configuration
+      try
+      { $NetAdapterDetails = Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter "IPEnabled=True" -CimSession $CimSession -ErrorAction Stop
+        $NetworkAdapterInfo = $NetAdapterDetails | Select-Object -Property Description,
+            @{Name='IPAddress'; Expression={ ($_.IPAddress | Where-Object { $_ -notmatch ':' }) -join ', ' }},
+            @{Name='Subnet'; Expression={ ($_.IPSubnet | Select-Object -First 1) }},
+            @{Name='Gateway'; Expression={ if($_.DefaultIPGateway) { $_.DefaultIPGateway -join ', ' } else { '' } }},
+            @{Name='DNS Servers'; Expression={ if($_.DNSServerSearchOrder) { $_.DNSServerSearchOrder -join ', ' } else { '' } }},
+            @{Name='DHCP Enabled'; Expression={ $_.DHCPEnabled }},
+            MACAddress | ConvertTo-Html -Fragment
+        $NetworkCheck++
+      }
+      catch
+      { Write-Log -Message "Failed to fetch network adapter details: $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU
+      }
+      & $Mark 'NET' $NetworkCheck 1
+
+      #Security Data............................................................................................................................................................................................................................................
+      & $Stage 'SEC'
+      $SecurityCheck = 0
+      #Firewall Profile Status
+      try
+      { $FirewallDetails = Get-CimInstance -Namespace 'root\StandardCimv2' -ClassName MSFT_NetFirewallProfile -CimSession $CimSession -ErrorAction Stop
+        $FirewallInfo = $FirewallDetails | Select-Object -Property Name, Enabled,
+            @{Name='Default Inbound'; Expression={ switch($_.DefaultInboundAction) { 0 {'NotConfigured'} 1 {'Allow'} 2 {'Block'} default {$_} } }},
+            @{Name='Default Outbound'; Expression={ switch($_.DefaultOutboundAction) { 0 {'NotConfigured'} 1 {'Allow'} 2 {'Block'} default {$_} } }} | ConvertTo-Html -Fragment
+        $SecurityCheck++
+      }
+      catch
+      { Write-Log -Message "Failed to fetch firewall profile details: $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU
+      }
+
+      #SSL/TLS Certificate Expiration (local scan only)
+      try
+      { if($IsLocal)
+        { $CertWarnDays = if($PathFiles -and $PathFiles.Thresholds -and $PathFiles.Thresholds.CertExpiryWarningDays) { [int]$PathFiles.Thresholds.CertExpiryWarningDays } else { 30 }
+          $CertThreshold = (Get-Date).AddDays($CertWarnDays)
+          $CertDetails = Get-ChildItem -Path 'Cert:\LocalMachine\My' -ErrorAction Stop | Where-Object { $_.NotAfter -le $CertThreshold -and $_.NotAfter -ge (Get-Date).AddDays(-1) }
+          if($CertDetails)
+          { $CertificateInfo = $CertDetails | Select-Object -Property Subject,
+                @{Name='Thumbprint'; Expression={ $_.Thumbprint.Substring(0,16) + '...' }},
+                @{Name='NotAfter'; Expression={ $_.NotAfter.ToString('yyyy-MM-dd') }},
+                @{Name='Days Remaining'; Expression={ [math]::Max(0, [math]::Floor(($_.NotAfter - (Get-Date)).TotalDays)) }},
+                Issuer | ConvertTo-Html -Fragment
+          }
+          else
+          { $CertificateInfo = $null }
+          $SecurityCheck++
+        }
+        else
+        { $CertificateInfo = [string](AddPreContentMessage -Type 'Information' -Message 'Certificate check is available for local scans only. Run the tool on the target host for certificate details.')
+          $SecurityCheck++
+        }
+      }
+      catch
+      { Write-Log -Message "Failed to fetch certificate details: $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU
+      }
+
+      #Antivirus / Defender Status
+      try
+      { $DefenderInfo = Get-CimInstance -Namespace 'root\Microsoft\Windows\Defender' -ClassName MSFT_MpComputerStatus -CimSession $CimSession -ErrorAction Stop
+        $AntivirusInfo = $DefenderInfo | Select-Object -Property @{Name='Antivirus'; Expression={ 'Windows Defender' }},
+            @{Name='Real-Time Protection'; Expression={ $_.RealTimeProtectionEnabled }},
+            @{Name='Antivirus Enabled'; Expression={ $_.AntivirusEnabled }},
+            @{Name='Signature Version'; Expression={ $_.AntivirusSignatureVersion }},
+            @{Name='Last Updated'; Expression={ if($_.AntivirusSignatureLastUpdated) { $_.AntivirusSignatureLastUpdated.ToString('yyyy-MM-dd HH:mm:ss') } else { 'Unknown' } }} | ConvertTo-Html -Fragment
+        $SecurityCheck++
+      }
+      catch
+      { Write-Log -Message "Failed to fetch antivirus details (Defender may not be present): $($_.Exception.Message)" -Level "WARNING" -LogPath $LogHCU
+        $AntivirusInfo = $null
+        $SecurityCheck++
+      }
+
+      #BitLocker Encryption Status
+      try
+      { $BitLockerDetails = Get-CimInstance -Namespace 'root\CIMV2\Security\MicrosoftVolumeEncryption' -ClassName Win32_EncryptableVolume -CimSession $CimSession -ErrorAction Stop
+        if($BitLockerDetails)
+        { $BitLockerInfo = $BitLockerDetails | Select-Object -Property DriveLetter,
+              @{Name='Protection Status'; Expression={ switch($_.ProtectionStatus) { 0 {'Off'} 1 {'On'} 2 {'Unknown'} default {$_} } }},
+              @{Name='Conversion Status'; Expression={ switch($_.ConversionStatus) { 0 {'Fully Decrypted'} 1 {'Fully Encrypted'} 2 {'Encryption In Progress'} 3 {'Decryption In Progress'} 4 {'Encryption Paused'} 5 {'Decryption Paused'} default {$_} } }} | ConvertTo-Html -Fragment
+        }
+        else
+        { $BitLockerInfo = $null }
+        $SecurityCheck++
+      }
+      catch
+      { Write-Log -Message "Failed to fetch BitLocker details: $($_.Exception.Message)" -Level "WARNING" -LogPath $LogHCU
+        $BitLockerInfo = $null
+        $SecurityCheck++
+      }
+
+      #Secure Boot Status
+      try
+      { $SecureBootValue = (Invoke-CimMethod -CimSession $CimSession -Namespace 'root\cimv2' -ClassName StdRegProv -MethodName GetDWORDValue `
+            -Arguments @{ hDefKey = $HKLM; sSubKeyName = 'SYSTEM\CurrentControlSet\Control\SecureBoot\State'; sValueName = 'UEFISecureBootEnabled' } -ErrorAction Stop).uValue
+        $SecureBootInfo = [PSCustomObject]@{
+            'Secure Boot' = if($SecureBootValue -eq 1) { 'Enabled' } elseif($SecureBootValue -eq 0) { 'Disabled' } else { 'Not Supported / Unknown' }
+        } | ConvertTo-Html -Fragment
+        $SecurityCheck++
+      }
+      catch
+      { Write-Log -Message "Failed to fetch Secure Boot status: $($_.Exception.Message)" -Level "ERROR" -LogPath $LogHCU
+      }
+      & $Mark 'SEC' $SecurityCheck 5
       & $Stage 'report'
 
       #--- Substitute placeholders, write the report ------------------------------
@@ -543,6 +773,19 @@ function Get-ServerHealth
       $html = $html.Replace("{{Generated: ReportTimestamp}}", "Generated: $GeneratedAt")
       $html = $html.Replace("{{Scanned By: ReportAuthor}}", "Scanned By: $(& $HtmlEscape "$env:USERDOMAIN\$env:USERNAME")")
       $html = $html.Replace("{{Report Version: ReportVersion}}", "Report Version: $($reportInfo.Version)")
+      $ThresholdsJson = if($PathFiles -and $PathFiles.Thresholds) {
+          @{
+              diskWarn = if($PathFiles.Thresholds.DiskUsageWarningPercent) { $PathFiles.Thresholds.DiskUsageWarningPercent } else { 70 }
+              diskCrit = if($PathFiles.Thresholds.DiskUsageCriticalPercent) { $PathFiles.Thresholds.DiskUsageCriticalPercent } else { 90 }
+              memWarn  = if($PathFiles.Thresholds.MemoryUsageWarningPercent) { $PathFiles.Thresholds.MemoryUsageWarningPercent } else { 70 }
+              memCrit  = if($PathFiles.Thresholds.MemoryUsageCriticalPercent) { $PathFiles.Thresholds.MemoryUsageCriticalPercent } else { 90 }
+              cpuWarn  = if($PathFiles.Thresholds.CpuUsageWarningPercent) { $PathFiles.Thresholds.CpuUsageWarningPercent } else { 70 }
+              cpuCrit  = if($PathFiles.Thresholds.CpuUsageCriticalPercent) { $PathFiles.Thresholds.CpuUsageCriticalPercent } else { 90 }
+              pageWarn = if($PathFiles.Thresholds.PagefileUsageWarningPercent) { $PathFiles.Thresholds.PagefileUsageWarningPercent } else { 70 }
+              pageCrit = if($PathFiles.Thresholds.PagefileUsageCriticalPercent) { $PathFiles.Thresholds.PagefileUsageCriticalPercent } else { 90 }
+          } | ConvertTo-Json -Compress
+      } else { '{"diskWarn":70,"diskCrit":90,"memWarn":70,"memCrit":90,"cpuWarn":70,"cpuCrit":90,"pageWarn":70,"pageCrit":90}' }
+      $html = $html.Replace('/* THRESHOLDS_JSON */', $ThresholdsJson)
       $html = $html.Replace("<!-- Hardware_BIOS -->", (& $Fragment $BIOSInfo 'BIOS details could not be read.'))
       $html = $html.Replace("<!-- Hardware_Battery -->", (& $Fragment $BatteryInfo 'No battery detected on this host.'))
       $html = $html.Replace("<!-- Hardware_CPU-->", (& $Fragment $CPUInfo 'CPU details could not be read.'))
@@ -567,6 +810,19 @@ function Get-ServerHealth
       $html = $html.Replace("<!-- Updates_Details -->", (& $Fragment $UpdateHistory 'Update history is unavailable. On a remote host this usually means DCOM activation of the Windows Update agent is blocked.'))
       $html = $html.Replace("<!-- Event_Log_Application -->", (& $Fragment $AEvent 'Application event log could not be read.'))
       $html = $html.Replace("<!-- Event_Log_System -->", (& $Fragment $SEvent 'System event log could not be read.'))
+      $html = $html.Replace('<!-- OS_PendingReboot -->', (& $Fragment $RebootInfo 'Pending reboot status could not be determined.'))
+      $html = $html.Replace('<!-- OS_NTPTimeSync -->', (& $Fragment $TimeSyncInfo 'NTP/Time sync details could not be read.'))
+      $html = $html.Replace('<!-- Hardware_Pagefile -->', (& $Fragment $PagefileInfo 'No pagefile information available, or details could not be read.'))
+      $html = $html.Replace('<!-- Hardware_PowerPlan -->', (& $Fragment $PowerPlanInfo 'Power plan details could not be read.'))
+      $html = $html.Replace('<!-- Hardware_DiskDrive -->', (& $Fragment $DiskDriveInfo 'Physical disk drive details could not be read.'))
+      $html = $html.Replace('<!-- Hardware_VSS -->', (& $Fragment $VSSInfo 'No shadow copies found, or VSS details could not be read.'))
+      $html = $html.Replace('<!-- Hardware_TopProcesses -->', (& $Fragment $TopProcessInfo 'Process details could not be read.'))
+      $html = $html.Replace('<!-- Network_Adapters -->', (& $Fragment $NetworkAdapterInfo 'No active network adapters found, or adapter details could not be read.'))
+      $html = $html.Replace('<!-- Security_Firewall -->', (& $Fragment $FirewallInfo 'Firewall profile status could not be read (requires Server 2012+).'))
+      $html = $html.Replace('<!-- Security_Certificates -->', (& $Fragment $CertificateInfo 'No certificates expiring within 30 days, or certificate store could not be read.'))
+      $html = $html.Replace('<!-- Security_Antivirus -->', (& $Fragment $AntivirusInfo 'Antivirus details could not be read. Windows Defender may not be the active antivirus.'))
+      $html = $html.Replace('<!-- Security_BitLocker -->', (& $Fragment $BitLockerInfo 'BitLocker is not available or no encryptable volumes were found.'))
+      $html = $html.Replace('<!-- Security_SecureBoot -->', (& $Fragment $SecureBootInfo 'Secure Boot status could not be determined.'))
 
       # WriteAllText with an explicit UTF8 BOM rather than Out-File: Out-File's default
       # encoding differs between 5.1 (UTF-16LE) and 7 (UTF-8), so the same report was written
@@ -584,21 +840,23 @@ function Get-ServerHealth
       # every single check failed still reported "Check File". $MaxScore is summed from the
       # per-group maxima rather than hardcoded, so adding a check to a group cannot leave a
       # stale literal behind that silently makes a full pass unreachable instead.
-      $MaxScore = 6 + 4 + 4 + 1 + 1 + 2 + 2
-      $AllValueCount = $HardWareCheck + $OSCheck + $UsersCheck + $ServiceCheck + $ApplicationCheck + $UpdateCheck + $EventLogCheck
+      $MaxScore = 11 + 6 + 4 + 2 + 1 + 2 + 2 + 1 + 5
+      $AllValueCount = $HardWareCheck + $OSCheck + $UsersCheck + $ServiceCheck + $ApplicationCheck + $UpdateCheck + $EventLogCheck + $NetworkCheck + $SecurityCheck
       $AllGood = if($AllValueCount -eq 0){"No"} elseif($AllValueCount -lt $MaxScore){"Check File"} else{"Yes"}
 
       # Return the server health data
       return [PSCustomObject]@{
                 Server             = $ServerName
                 Status             = "Online"
-                HardWare_Check     = if($HardWareCheck -lt 6){"$WarningSymbol" } else{"$SuccessSymbol" }
-                OS_Check           = if($OSCheck -lt 4){$WarningSymbol} else{$SuccessSymbol}
+                HardWare_Check     = if($HardWareCheck -lt 11){$WarningSymbol} else{$SuccessSymbol}
+                OS_Check           = if($OSCheck -lt 6){$WarningSymbol} else{$SuccessSymbol}
                 Users_Check        = if($UsersCheck -lt 4){$WarningSymbol} else{$SuccessSymbol}
-                Service_Check      = if($ServiceCheck -lt 1){$WarningSymbol} else{$SuccessSymbol}
+                Service_Check      = if($ServiceCheck -lt 2){$WarningSymbol} else{$SuccessSymbol}
                 Application_Check  = if($ApplicationCheck -lt 1){$WarningSymbol} else{$SuccessSymbol}
                 Update_Check       = if($UpdateCheck -lt 2){$WarningSymbol} else{$SuccessSymbol}
                 EventLog_Check     = if($EventLogCheck -lt 2){$WarningSymbol} else{$SuccessSymbol}
+                Network_Check      = if($NetworkCheck -lt 1){$WarningSymbol} else{$SuccessSymbol}
+                Security_Check     = if($SecurityCheck -lt 5){$WarningSymbol} else{$SuccessSymbol}
                 All_Good           = $AllGood
             }
     }
@@ -621,6 +879,8 @@ function Get-ServerHealth
                 Application_Check  = "N/A"
                 Update_Check       = "N/A"
                 EventLog_Check     = "N/A"
+                Network_Check      = "N/A"
+                Security_Check     = "N/A"
                 All_Good           = "N/A"
             }
     }
@@ -637,6 +897,8 @@ function Get-ServerHealth
             Application_Check  = $FailedSymbol
             Update_Check       = $FailedSymbol
             EventLog_Check     = $FailedSymbol
+            Network_Check      = $FailedSymbol
+            Security_Check     = $FailedSymbol
             All_Good           = "No"
         }
   }

@@ -30,7 +30,7 @@ $script:BannerGutter = ''
 
 # The check groups HealthCheck.ps1 reports progress for, in run order. Drives both the
 # progress bar and the per-check strip, so a new group goes here and in its $Mark call.
-$script:ScanSteps = @('OS','HW','USR','SVC','APP','UPD','EVT')
+$script:ScanSteps = @('OS','HW','USR','SVC','APP','UPD','EVT','NET','SEC')
 
 #------------------------------------------------------------------------------
 # Initialisation
@@ -444,10 +444,10 @@ function Show-SummaryTable
   $serverW = 6
   foreach($r in $Results) { if(([string]$r.Server).Length -gt $serverW) { $serverW = ([string]$r.Server).Length } }
   # Cap SERVER so a long FQDN can't push the table past the console width. Every other
-  # column is fixed, so the non-server width is a constant 73 (STATUS 11 + seven 3-wide
-  # checks + RESULT 10, each +2 padding, plus 11 borders) with one extra space on the
+  # column is fixed, so the non-server width is a constant 85 (STATUS 11 + nine 3-wide
+  # checks + RESULT 10, each +2 padding, plus 13 borders) with one extra space on the
   # leading column. SERVER takes what's left, never below 6; Format-Cell truncates.
-  $maxServerW = [math]::Max(6, (Get-UIWidth) - 74 - $script:Gutter.Length)
+  $maxServerW = [math]::Max(6, (Get-UIWidth) - 86 - $script:Gutter.Length)
   if($serverW -gt $maxServerW) { $serverW = $maxServerW }
 
   $cols = @(
@@ -461,6 +461,8 @@ function Show-SummaryTable
     @{ H = 'APP';    W = 3;        A = 'center'; K = 'Application_Check' }
     @{ H = 'UPD';    W = 3;        A = 'center'; K = 'Update_Check' }
     @{ H = 'EVT';    W = 3;        A = 'center'; K = 'EventLog_Check' }
+    @{ H = 'NET';    W = 3;        A = 'center'; K = 'Network_Check' }
+    @{ H = 'SEC';    W = 3;        A = 'center'; K = 'Security_Check' }
     @{ H = 'RESULT'; W = 10;       A = 'left';   K = 'All_Good' }
   )
 
